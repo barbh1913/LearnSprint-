@@ -1,13 +1,178 @@
-export interface HealthStatus {
-  status: string
+// Typed wrapper around the backend API. Every call goes through `request`, so
+// the auth header and error handling live in exactly one place.
+
+import type {
+  Board,
+  Course,
+  ExamType,
+  Grades,
+  MasteryLevel,
+  Schedule,
+  Topic,
+  TopicStatus,
+  User,
+  UserConstraints,
+  Velocity,
+} from '../types'
+
+const TOKEN_KEY = 'learnsprint.token'
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
 }
 
-export async function getHealth(): Promise<HealthStatus> {
-  const response = await fetch('/api/health')
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken()
+  const isFormData = options.body instanceof FormData
+
+  const response = await fetch(`/api${path}`, {
+    ...options,
+    headers: {
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  })
 
   if (!response.ok) {
-    throw new Error(`Health check failed: ${response.status}`)
+    throw new ApiError(await readErrorMessage(response), response.status)
   }
 
-  return response.json()
+  return response.status === 204 ? (undefined as T) : response.json()
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = await response.json()
+    // FastAPI validation errors come back as a list of objects, not a string.
+    if (Array.isArray(body.detail)) {
+      return body.detail.map((item: { msg?: string }) => item.msg).join(', ')
+    }
+    return body.detail ?? `Request failed (${response.status})`
+  } catch {
+    return `Request failed (${response.status})`
+  }
+}
+
+export const api = {
+  health: () => request<{ status: string }>('/health'),
+
+  register: (email: string, password: string) =>
+    request<{ access_token: string }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<{ access_token: string }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  me: () => request<User>('/auth/me'),
+
+  listCourses: () => request<Course[]>('/courses'),
+
+  getCourse: (courseId: string) => request<Course>(`/courses/${courseId}`),
+
+  createCourse: (course: {
+    name: string
+    year: number
+    semester: string
+    credits: number
+    examDate?: string | null
+    examType?: ExamType
+  }) => request<Course>('/courses', { method: 'POST', body: JSON.stringify(course) }),
+
+  updateCourse: (courseId: string, changes: Partial<Course>) =>
+    request<Course>(`/courses/${courseId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  deleteCourse: (courseId: string) =>
+    request<void>(`/courses/${courseId}`, { method: 'DELETE' }),
+
+  setGrade: (courseId: string, finalGrade: number | null) =>
+    request<Course>(`/courses/${courseId}/grade`, {
+      method: 'PUT',
+      body: JSON.stringify({ finalGrade }),
+    }),
+
+  getGrades: () => request<Grades>('/grades'),
+
+  getConstraints: () => request<UserConstraints>('/constraints'),
+
+  saveConstraints: (constraints: UserConstraints) =>
+    request<UserConstraints>('/constraints', {
+      method: 'PUT',
+      body: JSON.stringify(constraints),
+    }),
+
+  listTopics: (courseId: string) => request<Topic[]>(`/courses/${courseId}/topics`),
+
+  createTopic: (courseId: string, name: string) =>
+    request<Topic>(`/courses/${courseId}/topics`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  updateTopic: (courseId: string, topicId: string, changes: Partial<Topic>) =>
+    request<Topic>(`/courses/${courseId}/topics/${topicId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  deleteTopic: (courseId: string, topicId: string) =>
+    request<void>(`/courses/${courseId}/topics/${topicId}`, { method: 'DELETE' }),
+
+  extractTopics: (courseId: string, file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<{ created: Topic[]; detectedLanguage: string; sourceFilename: string }>(
+      `/courses/${courseId}/topics/extract`,
+      { method: 'POST', body },
+    )
+  },
+
+  getBoard: (courseId?: string) =>
+    request<Board>(courseId ? `/board?courseId=${courseId}` : '/board'),
+
+  setTopicProgress: (
+    courseId: string,
+    topicId: string,
+    changes: { status?: TopicStatus; masteryLevel?: MasteryLevel },
+  ) =>
+    request<{ topicId: string; status: TopicStatus; masteryLevel: MasteryLevel | null }>(
+      `/topics/${topicId}/progress?courseId=${courseId}`,
+      { method: 'PATCH', body: JSON.stringify(changes) },
+    ),
+
+  setActionDone: (courseId: string, actionId: string, isDone: boolean) =>
+    request<{ actionId: string; isDone: boolean; topicId: string }>(
+      `/actions/${actionId}/progress?courseId=${courseId}`,
+      { method: 'PATCH', body: JSON.stringify({ isDone }) },
+    ),
+
+  getSchedule: (courseId: string) => request<Schedule>(`/courses/${courseId}/schedule`),
+
+  getVelocity: () => request<Velocity>('/velocity'),
 }

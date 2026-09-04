@@ -1,7 +1,53 @@
-import { HealthCheckPage } from './pages/HealthCheckPage'
+import type { ReactNode } from 'react'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { AuthProvider, useAuth } from './auth/AuthContext'
+import { AppLayout } from './components/AppLayout'
+import { Spinner } from './components/ui/primitives'
+import { LoginPage } from './pages/LoginPage'
+import { DashboardPage } from './pages/DashboardPage'
+import { CoursesPage } from './pages/CoursesPage'
+import { CourseDetailPage } from './pages/CourseDetailPage'
+import { BoardPage } from './pages/BoardPage'
+import { GanttPage } from './pages/GanttPage'
+import { GradesPage } from './pages/GradesPage'
+import { ProfilePage } from './pages/ProfilePage'
+
+/** Keeps unauthenticated visitors out of the app pages. */
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { user, isLoading } = useAuth()
+
+  if (isLoading) return <Spinner label="Loading your account" />
+  if (!user) return <Navigate to="/login" replace />
+
+  return <>{children}</>
+}
 
 function App() {
-  return <HealthCheckPage />
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            element={
+              <RequireAuth>
+                <AppLayout />
+              </RequireAuth>
+            }
+          >
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/courses" element={<CoursesPage />} />
+            <Route path="/courses/:courseId" element={<CourseDetailPage />} />
+            <Route path="/board" element={<BoardPage />} />
+            <Route path="/gantt" element={<GanttPage />} />
+            <Route path="/grades" element={<GradesPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  )
 }
 
 export default App
