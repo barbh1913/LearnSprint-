@@ -1,6 +1,6 @@
 ---
 name: implement-requirement
-description: Use when implementing or extending a functional requirement (FR) from the Study Planner spec (CLAUDE.md) end-to-end. Walks through the Clean Architecture layers in order and keeps the spec and code in sync. Trigger on requests like "implement FR2.3", "add the mastery rating feature", "build the group progress view".
+description: Use when implementing or extending a functional requirement (FR) from the LearnSprint spec (CLAUDE.md) end-to-end. Walks through the Clean Architecture layers in order and keeps the spec and code in sync. Trigger on requests like "implement FR2.3", "add the mastery rating feature", "build the group progress view".
 ---
 
 # Implement a functional requirement

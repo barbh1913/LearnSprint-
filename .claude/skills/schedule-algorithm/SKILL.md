@@ -1,6 +1,6 @@
 ---
 name: schedule-algorithm
-description: Use when building, changing, or reviewing the scheduling / time-allocation logic in the Study Planner project (FR3.1–FR3.3) — especially the mastery-weighted review-session split. This is the project's graded "significant algorithm", so treat it with more rigor than ordinary CRUD code. Trigger on requests like "build the review session split", "the schedule seems wrong", "recompute the allocation".
+description: Use when building, changing, or reviewing the scheduling / time-allocation logic in the LearnSprint project (FR3.1–FR3.3) — especially the mastery-weighted review-session split. This is the project's graded "significant algorithm", so treat it with more rigor than ordinary CRUD code. Trigger on requests like "build the review session split", "the schedule seems wrong", "recompute the allocation".
 ---
 
 # Scheduling / time-allocation algorithm

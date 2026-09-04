@@ -1,6 +1,6 @@
 # Entity-Relationship Diagram
 
-This is the authoritative data model for Study Planner. It must stay in sync with the Data Dictionary in [../CLAUDE.md](../CLAUDE.md).
+This is the authoritative data model for LearnSprint. It must stay in sync with the Data Dictionary in [../CLAUDE.md](../CLAUDE.md).
 
 ## Key decisions baked into this model
 
@@ -17,6 +17,7 @@ erDiagram
     USER ||--o{ COURSE_MEMBERSHIP : "has"
     USER ||--o{ USER_TOPIC_PROGRESS : "rates"
     USER ||--o{ USER_ACTION_PROGRESS : "tracks"
+    USER ||--o{ FRIENDSHIP : "requests/accepts"
 
     COURSE ||--o{ COURSE_MEMBERSHIP : "shared via"
     COURSE ||--o{ TOPIC : "contains"
@@ -72,7 +73,7 @@ erDiagram
     USER_TOPIC_PROGRESS {
         string user_id FK
         string topic_id FK
-        string status "todo/in_progress/done"
+        string status "backlog/todo/in_progress/needs_review/done"
         int mastery_level "1-5"
     }
 
@@ -81,6 +82,13 @@ erDiagram
         string action_id FK
         bool is_done
         datetime completed_at
+    }
+
+    FRIENDSHIP {
+        string id PK
+        string user_id FK
+        string friend_id FK
+        string status "pending/accepted"
     }
 ```
 

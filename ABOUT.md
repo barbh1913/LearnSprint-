@@ -10,7 +10,7 @@ I'm Bar, an undergraduate student in Information Systems. This project is my **f
 
 ## The project
 
-A study-planning system for exam prep — it turns simple scheduling into a learning methodology tool: it identifies topics from study material, builds a schedule that accounts for my time constraints and my mastery level per topic, emphasizes weak topics in the review session before the exam, and supports Study Groups so classmates can share a topic backlog while keeping personal schedules, grades, and constraints private.
+LearnSprint — an academic learning planner that turns simple scheduling into an Agile-flavored learning methodology tool: it identifies topics from study material into a Sprint Backlog, builds a schedule that accounts for my time constraints and my mastery level per topic, emphasizes weak topics in the review session before the exam, and supports Study Groups so classmates can share a topic backlog while keeping personal schedules, grades, and constraints private.
 
 The full requirements live in [CLAUDE.md](CLAUDE.md) — the specification document that guides every work session with the agent on this project.
 
