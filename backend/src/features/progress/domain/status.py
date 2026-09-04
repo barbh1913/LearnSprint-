@@ -53,6 +53,14 @@ def needs_mastery_prompt(*, actions_done: int, total_actions: int, mastery_level
 
 
 @dataclass(frozen=True)
+class WeeklyCount:
+    """Actions completed in one past week, for the velocity chart."""
+
+    week_start: str  # ISO date of the Sunday that week began
+    completed: int
+
+
+@dataclass(frozen=True)
 class Velocity:
     """Study pace over recent weeks (FR7.1)."""
 
@@ -61,6 +69,8 @@ class Velocity:
     weekly_average: float
     average_mastery: float | None
     trend: str  # "up", "down" or "steady"
+    history: tuple[WeeklyCount, ...] = ()
+    mastery_distribution: tuple[int, ...] = (0, 0, 0, 0, 0)  # counts for levels 1..5
 
 
 def compute_velocity(
@@ -88,7 +98,47 @@ def compute_velocity(
         weekly_average=round(in_window / weeks, 2),
         average_mastery=average_mastery,
         trend=_trend(this_week, last_week),
+        history=weekly_history(completed_at, now=now, weeks=6),
+        mastery_distribution=mastery_distribution(mastery_levels),
     )
+
+
+def weekly_history(
+    completed_at: list[datetime], *, now: datetime, weeks: int = 6
+) -> tuple[WeeklyCount, ...]:
+    """Actions completed in each of the last `weeks` weeks, oldest first.
+
+    Weeks with no activity are included as zero - a gap in the chart is real
+    information, and dropping it would distort the shape of the trend.
+    """
+    buckets: list[WeeklyCount] = []
+
+    for index in range(weeks - 1, -1, -1):
+        window_end = now - timedelta(days=7 * index)
+        window_start = window_end - timedelta(days=7)
+        buckets.append(
+            WeeklyCount(
+                week_start=window_start.date().isoformat(),
+                completed=sum(
+                    1 for stamp in completed_at if window_start <= stamp < window_end
+                ),
+            )
+        )
+
+    return tuple(buckets)
+
+
+def mastery_distribution(mastery_levels: list[int]) -> tuple[int, ...]:
+    """How many topics sit at each mastery level 1..5.
+
+    Shows the student where their weak spots are concentrated, which is what the
+    FR3.2 review split acts on.
+    """
+    counts = [0, 0, 0, 0, 0]
+    for level in mastery_levels:
+        if 1 <= level <= 5:
+            counts[level - 1] += 1
+    return tuple(counts)
 
 
 def _trend(this_week: int, last_week: int) -> str:

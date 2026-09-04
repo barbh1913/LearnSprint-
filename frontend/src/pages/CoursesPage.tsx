@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import { api } from '../api/client'
 import type { Course } from '../types'
 import {
@@ -141,6 +141,16 @@ export function CoursesPage() {
                   ? `Exam ${new Date(course.examDate).toLocaleDateString()}`
                   : 'No exam date set'}
               </p>
+
+              {/* The single most important action on a new course, so it gets a
+                  visible button rather than hiding behind the course name. */}
+              <Link
+                to={`/courses/${course.id}`}
+                className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-border py-2 text-sm font-medium transition-colors hover:border-primary hover:bg-muted"
+              >
+                <Upload className="size-4" aria-hidden />
+                Open and upload material
+              </Link>
             </Card>
           ))}
         </div>

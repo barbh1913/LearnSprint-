@@ -1,5 +1,7 @@
 # 0002 — Serverless (API Gateway + Lambda) over containers
 
+> **Partly superseded by [0006](0006-dynamodb-single-table.md).** The Lambda-per-feature decision stands; the RDS backing store was replaced by DynamoDB, which also dissolves the connection-pooling question raised below.
+
 ## Context
 
 The backend needs to run on AWS. Traffic for this system is a single student plus, later, a small study group — sparse and bursty, not sustained production load. An earlier draft of the architecture used ECS Fargate behind an Application Load Balancer, with RDS in a private VPC.

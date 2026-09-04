@@ -1,5 +1,7 @@
 # 0003 — Local-first development, AWS added incrementally
 
+> **Partly superseded by [0006](0006-dynamodb-single-table.md).** Building features before infrastructure still holds, but development is no longer AWS-free: there is no local database, and the app talks to the real DynamoDB table. The test suite remains fully offline.
+
 ## Context
 
 The target architecture is fully serverless on AWS (API Gateway, Lambda, RDS, Cognito, CloudFront/S3, CDK). None of CLAUDE.md's grading criteria score infrastructure or deployment directly — the weight is on Specification, UI/UX, Development, Algorithms, and Innovation. Standing up the full AWS stack before any FR exists would mean paying for and operating cloud infrastructure with nothing running on it yet, and CLAUDE.md's own scope note says to build the core stable before extending it.

@@ -129,12 +129,21 @@ export interface AiSettings {
   keyHint: string | null
 }
 
+export interface WeeklyCount {
+  weekStart: string
+  completed: number
+}
+
 export interface Velocity {
   actionsCompletedThisWeek: number
   actionsCompletedLastWeek: number
   weeklyAverage: number
   averageMastery: number | null
   trend: 'up' | 'down' | 'steady'
+  /** Last six weeks, oldest first — drives the velocity chart. */
+  history: WeeklyCount[]
+  /** Topic counts at mastery 1..5. */
+  masteryDistribution: number[]
 }
 
 export const STATUS_ORDER: TopicStatus[] = [

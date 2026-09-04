@@ -25,14 +25,14 @@ Note on terminology: the Agile/Sprint framing is applied to naming and UI copy o
 The system is a physically separated frontend and backend, deployed serverless on AWS. See [docs/adr/](docs/adr/) for the reasoning behind these choices and [docs/diagrams/](docs/diagrams/) for the visual architecture.
 
 - **Frontend**: React + TypeScript + Vite, styled with Tailwind CSS + shadcn/ui (Radix-based) components, Lucide-react icons, React Router DOM for client-side routing. Explicit types for every entity (see data dictionary below), no `any`.
-- **Backend**: Python + FastAPI. Pydantic for request/response schemas, SQLAlchemy for the ORM, Alembic for migrations. Type-hinted throughout — no untyped functions.
+- **Backend**: Python + FastAPI. Pydantic for request/response schemas, `boto3` for DynamoDB. Type-hinted throughout — no untyped functions.
 - **Clean Architecture**, organized by business feature (see `backend/src/features/`), with each feature keeping its own:
   - **Domain** — entities and pure business logic (schedule calculation, weighted average, time-allocation algorithm) — no dependency on UI, DB, or web framework.
   - **Application/Use Cases** — orchestration of the logic (e.g. "generate schedule for course").
   - **Infrastructure** — DB access, text extraction from files, AWS adapters (auth, storage).
   - **Presentation** — FastAPI routers locally, Lambda handlers in production; both thin, no business logic.
-- **Local development has no AWS dependency**: FastAPI + Vite dev servers against a local Postgres container.
-- **Target deployment (added incrementally, after the core FRs work locally)**: React build on S3 + CloudFront; API Gateway routing to Lambda functions grouped by business feature; RDS PostgreSQL; Cognito for auth; CloudWatch for logs/metrics; all provisioned via AWS CDK (Python).
+- **Persistence**: a single DynamoDB table, `LearnSprint` (composite `PK`/`SK` + one GSI). There is no local database — development runs against the real table; see [ADR 0006](docs/adr/0006-dynamodb-single-table.md) and [docs/erd.md](docs/erd.md) for the key design. Tests run against an in-memory fake and stay fully offline.
+- **Target deployment (added incrementally, after the core FRs work locally)**: React build on S3 + CloudFront; API Gateway routing to Lambda functions grouped by business feature; the same DynamoDB table; S3 for uploaded material.
 - **Testing**: `pytest` for the backend (heaviest on the Domain layer, especially the FR3.2 algorithm), Vitest + React Testing Library for the frontend.
 - Clean, readable code: meaningful names, small focused functions, no comments that explain "what" (the code itself should be clear) — comments only when there's a non-obvious reason.
 
@@ -88,17 +88,15 @@ Manual drags are an override, not the primary mechanism — the system still der
 - **FR8.1** — A user can send another user a friend request by email and accept/decline incoming requests, independent of any shared course or Study Group (FR5).
 - **FR8.2** — The Profile view lists a user's friends, each showing the same coarse-grained aggregate progress indicator defined in FR5.3 — never grades or constraints, per NFR3.
 
-## Use Cases — Study Groups
+## Use Cases
 
-- **UC10 — Create a study group**: Actors: student (owner), system. The student sets up/selects a course and invites members by email; the system sends join notifications.
-- **UC11 — Collaborative backlog editing**: Actors: group members. Any member can edit topics/actions/time estimates; the change is reflected for everyone.
-- **UC12 — Group progress monitoring**: Actors: group members. The course dashboard shows a progress bar per group member, without exposing personal schedules or grades.
+Full use cases with alternative flows and postconditions: **[docs/use-cases.md](docs/use-cases.md)**.
 
-(Core single-user use cases — course setup, topic extraction, schedule generation — will be numbered UC1–UC9 in the full spec document when written; the numbering here continues intentionally from there.)
+UC1 register/sign in · UC2 define time constraints · UC3 set up a course · UC4 upload material and extract topics · UC5 enable AI analysis · UC6 **plan the weekly sprint** (the core loop) · UC7 generate a study plan · UC8 study and record progress · UC9 track grades and progress · UC10–UC12 Study Groups (specified, not built).
 
 ## Data Dictionary
 
-Full ER diagram: [docs/erd.md](docs/erd.md). Sharing changes the data model: some data is **shared** within a group (course content, topics, actions), and some is strictly **private per user** (constraints, grades, personal progress) — including for a solo, non-grouped course. Model this explicitly with separate tables — don't bolt privacy on as a filter over shared rows.
+Full data model and DynamoDB key design: [docs/erd.md](docs/erd.md). Some data is **shared** within a group (course content, topics, actions), and some is strictly **private per user** (constraints, grades, personal progress) — including for a solo, non-grouped course. Model this as separate item types keyed by owner; don't bolt privacy on as a filter over shared records.
 
 | Entity | Fields | Shared / Private |
 |---|---|---|
@@ -110,7 +108,8 @@ Full ER diagram: [docs/erd.md](docs/erd.md). Sharing changes the data model: som
 | **UserTopicProgress** | `userId`, `topicId`, `status: 'backlog' \| 'todo' \| 'in_progress' \| 'needs_review' \| 'done'`, `masteryLevel?: 1..5` | Private (per-user view of a shared Topic) |
 | **UserActionProgress** | `userId`, `actionId`, `isDone: boolean`, `completedAt?: DateTime` | Private |
 | **UserConstraints** | `userId`, `blockedSlots: {day, startTime, endTime}[]`, `timePreference: 'morning' \| 'evening'` | Private |
-| **Friendship** | `id`, `userId`, `friendId`, `status: 'pending' \| 'accepted'` | Private (visible only to the two users involved) |
+| **AiSettings** | `userId`, `aiEnabled: boolean`, `apiKey` | Private — **never returned by any API response and never logged** (FR2.7) |
+| **Friendship** | `id`, `userId`, `friendId`, `status: 'pending' \| 'accepted'` | Private (visible only to the two users involved) — FR8, not built |
 
 Define these as explicit types in the backend Domain layer (Python dataclasses or Pydantic models, per feature) and mirror them as TypeScript types on the frontend — reuse consistently within each side, no duplicate near-identical types.
 
@@ -119,6 +118,7 @@ Notes on the model:
 - `masteryLevel` and topic `status` live on `UserTopicProgress`, not on `Topic` — the FR3.2 algorithm reads mastery per `(user, topic)`, never a shared value.
 - `finalGrade` lives on `CourseMembership`, never on `Course` — this is what makes FR5.4 (grade privacy) structurally true rather than a UI-level filter.
 - **The generated schedule (FR3.1–FR3.3 output) is not a stored entity.** It's computed on demand in the Domain layer from `UserConstraints` + `UserTopicProgress.masteryLevel` + the shared topic/action list, which is viable specifically because NFR2 already requires that computation to finish in under 2 seconds. This also avoids having to invalidate a stored schedule whenever a shared topic changes under a group member. If schedule history ever becomes a requirement, that's a new, explicitly-versioned entity — not something to retrofit into this table.
+- **The sprint is not a stored entity either.** The week comes from the current date, capacity from `UserConstraints`, and the commitment from whichever topics currently sit in `todo` / `in_progress`. Moving a card *is* changing the sprint, so there is no separate sprint record that could drift out of sync with the board.
 
 ## Edge cases — must be handled explicitly
 

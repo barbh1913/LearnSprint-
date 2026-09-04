@@ -1,103 +1,129 @@
-# Entity-Relationship Diagram
+# Data model
 
-This is the authoritative data model for LearnSprint. It must stay in sync with the Data Dictionary in [../CLAUDE.md](../CLAUDE.md).
+LearnSprint stores everything in a single DynamoDB table (see [ADR 0006](adr/0006-dynamodb-single-table.md) for why DynamoDB rather than a relational database).
 
-## Key decisions baked into this model
+## Entities and relationships
 
-- **Shared vs. private is modeled as separate tables, not a flag.** `COURSE`, `TOPIC`, and `LEARNING_ACTION` hold only content that every group member sees identically. Anything personal — grade, mastery rating, completion status, time constraints — lives in a table keyed by `user_id`, even for a solo (non-grouped) course.
-- **No standalone `STUDY_GROUP` entity.** A "group" is just the set of `COURSE_MEMBERSHIP` rows for a course. One course ↔ one implicit group. If the project ever needs multiple independent groups around the same course, this will need to split — not needed for the current FRs.
-- **Ownership and grade merged into `COURSE_MEMBERSHIP`.** Every user who can see a course — including a solo user with no groupmates — has exactly one `COURSE_MEMBERSHIP` row, holding their `role` and their personal `final_grade`. This is also what enforces FR5.4 (grades are per-row, per-user, never a field on the shared `COURSE`).
-- **The generated schedule is *not* persisted.** It's a pure Domain-layer output, recomputed from `USER_CONSTRAINT`, `USER_TOPIC_PROGRESS.mastery_level`, and the shared topic/action list. NFR2 already requires recompute in under 2 seconds, which is what makes "always recompute, never store" viable — it also sidesteps having to invalidate/sync a stored schedule whenever a shared topic changes under a group member. If the project later needs schedule history (e.g. "what was I told to do last Tuesday"), that would be a separate, explicitly-versioned snapshot table — not needed for FR3.x as currently scoped.
-
-## Diagram
+The logical model first — this is what the application reasons about, independent of how it's stored:
 
 ```mermaid
 erDiagram
-    USER ||--o{ USER_CONSTRAINT : "defines"
-    USER ||--o{ COURSE_MEMBERSHIP : "has"
+    USER ||--o{ COURSE_MEMBERSHIP : "enrolled via"
+    USER ||--|| USER_CONSTRAINTS : "defines"
+    USER ||--o| AI_SETTINGS : "configures"
     USER ||--o{ USER_TOPIC_PROGRESS : "rates"
-    USER ||--o{ USER_ACTION_PROGRESS : "tracks"
-    USER ||--o{ FRIENDSHIP : "requests/accepts"
+    USER ||--o{ USER_ACTION_PROGRESS : "completes"
 
     COURSE ||--o{ COURSE_MEMBERSHIP : "shared via"
     COURSE ||--o{ TOPIC : "contains"
-
-    TOPIC ||--o{ LEARNING_ACTION : "divided_into"
-    TOPIC ||--o{ USER_TOPIC_PROGRESS : "tracked_by"
-
-    LEARNING_ACTION ||--o{ USER_ACTION_PROGRESS : "has_status"
+    TOPIC ||--o{ LEARNING_ACTION : "divided into"
+    TOPIC ||--o{ USER_TOPIC_PROGRESS : "tracked by"
+    LEARNING_ACTION ||--o{ USER_ACTION_PROGRESS : "tracked by"
 
     USER {
         string id PK
         string email
-        string password_hash
-        string time_preference "morning/evening"
+        string passwordHash
+        string createdAt
     }
-
-    USER_CONSTRAINT {
-        string id PK
-        string user_id FK
-        int day_of_week
-        time start_time
-        time end_time
-    }
-
     COURSE {
         string id PK
         string name
         int year
         string semester
         float credits
+        string examDate
+        string examType
     }
-
     COURSE_MEMBERSHIP {
-        string user_id FK
-        string course_id FK
-        string role "owner/member"
-        float final_grade "private, nullable until entered"
+        string userId FK
+        string courseId FK
+        string role
+        float finalGrade
     }
-
     TOPIC {
         string id PK
-        string course_id FK
+        string courseId FK
         string name
+        bool isPriority
     }
-
     LEARNING_ACTION {
         string id PK
-        string topic_id FK
-        string action_type "read/summary/quiz"
-        int default_duration_minutes
+        string topicId FK
+        string type
+        int defaultDurationMinutes
     }
-
     USER_TOPIC_PROGRESS {
-        string user_id FK
-        string topic_id FK
-        string status "backlog/todo/in_progress/needs_review/done"
-        int mastery_level "1-5"
+        string userId FK
+        string topicId FK
+        string status
+        int masteryLevel
     }
-
     USER_ACTION_PROGRESS {
-        string user_id FK
-        string action_id FK
-        bool is_done
-        datetime completed_at
+        string userId FK
+        string actionId FK
+        bool isDone
+        string completedAt
     }
-
-    FRIENDSHIP {
-        string id PK
-        string user_id FK
-        string friend_id FK
-        string status "pending/accepted"
+    USER_CONSTRAINTS {
+        string userId FK
+        json blockedSlots
+        string timePreference
+    }
+    AI_SETTINGS {
+        string userId FK
+        bool aiEnabled
+        string apiKey
     }
 ```
 
-## What changed from the first draft, and why
+## Shared vs. private — the rule that shapes everything
 
-| Original | Problem | Fix |
-|---|---|---|
-| `TOPIC.difficulty_rating` | Shared field, but mastery is per-student (FR2.4) — would force group members to share one rating | Moved to `USER_TOPIC_PROGRESS.mastery_level`, keyed by `(user_id, topic_id)` |
-| `COURSE.final_grade` | Shared field on a row multiple group members can access — directly violates FR5.4 (grades must stay private) | Moved to `COURSE_MEMBERSHIP.final_grade`, one row per `(user_id, course_id)` |
-| `COURSE.user_id "Owner"` + separate `STUDY_GROUP_MEMBERSHIP` | Ownership represented in two places | Merged: ownership is just `COURSE_MEMBERSHIP.role = 'owner'` |
-| `USER_PROGRESS` (action-level only) | No entity carried topic-level status/mastery (FR2.4, FR2.5 both need topic granularity, not just action) | Split into `USER_TOPIC_PROGRESS` (status + mastery, per topic) and `USER_ACTION_PROGRESS` (done/not, per action) |
-| No schedule entity | FR3.1–FR3.3 output (actual time blocks) wasn't represented anywhere | Deliberately *not* modeled as a table — see "generated schedule is not persisted" above |
+Course *content* is shared: a `Course`, its `Topic`s and their `LearningAction`s are one set of records that every enrolled student sees identically. Anything *personal* — the grade, the mastery rating, what's been completed, the blocked hours, the AI key — is stored per user.
+
+This is a structural guarantee, not a UI filter. There is no `finalGrade` column on `Course` that we remember to hide; the grade lives on the student's own `CourseMembership` record, so there is no query that could return another student's grade by accident. The same holds for mastery ratings and progress, which is what makes the Study Groups privacy requirement (FR5.4) true by construction.
+
+## Single-table key design
+
+DynamoDB has one table with a composite key (`PK`, `SK`) plus one global secondary index. Item type is chosen by the key prefix:
+
+| Entity | PK | SK | GSI1PK | GSI1SK |
+|---|---|---|---|---|
+| User | `USER#<userId>` | `PROFILE` | `EMAIL#<email>` | `USER#<userId>` |
+| UserConstraints | `USER#<userId>` | `CONSTRAINTS` | — | — |
+| AiSettings | `USER#<userId>` | `AI_SETTINGS` | — | — |
+| CourseMembership | `USER#<userId>` | `COURSE#<courseId>` | `COURSE#<courseId>` | `USER#<userId>` |
+| UserTopicProgress | `USER#<userId>` | `TPROG#<topicId>` | — | — |
+| UserActionProgress | `USER#<userId>` | `APROG#<actionId>` | — | — |
+| Course | `COURSE#<courseId>` | `META` | — | — |
+| Topic | `COURSE#<courseId>` | `TOPIC#<topicId>` | — | — |
+| LearningAction | `COURSE#<courseId>` | `TOPIC#<topicId>#ACTION#<actionId>` | — | — |
+
+Two deliberate choices in that layout:
+
+**Everything a user privately owns shares one partition** (`USER#<id>`), so "my courses", "my progress", and "my constraints" are each a single query with an SK prefix rather than a scan.
+
+**A course's whole content tree shares one partition** (`COURSE#<id>`), and actions sort immediately after their topic because their SK starts with the topic's SK. Loading a course with all its topics and actions is therefore *one* query, not one per topic.
+
+## Access patterns
+
+Every query the application makes, and how the keys serve it:
+
+| Access pattern | How |
+|---|---|
+| Log in by email | GSI1 query on `EMAIL#<email>` — login only knows the email, not the user id |
+| Load my courses | Query `PK=USER#<id>`, `SK` begins with `COURSE#` |
+| Load a course's topics and actions | Query `PK=COURSE#<id>` — returns the whole tree at once |
+| Load my progress | Query `PK=USER#<id>`, `SK` begins with `TPROG#` / `APROG#` |
+| List a course's members (FR5.3) | GSI1 query on `COURSE#<id>` — the reverse of the membership record |
+| Compute my weighted average | Query my memberships; course name, credits and semester are denormalised onto each membership record, so no second lookup is needed |
+
+## Denormalisation
+
+`CourseMembership` carries a copy of the course's `name`, `year`, `semester`, `credits`, `examDate` and `examType`. This is deliberate: the courses list and the grades page need those fields for every course, and without the copy each page would need one additional lookup per course. `update_course` refreshes the copies on every membership, which is the cost of the trade.
+
+## What is *not* stored
+
+**The generated schedule.** FR3.1–FR3.3 produce time blocks, and those are computed on demand and returned — never written back. See [ADR 0005](adr/0005-schedule-not-persisted.md).
+
+**Sprint state.** A sprint isn't a record either. It's derived: the week is computed from the current date, capacity from `UserConstraints`, and the commitment from whichever topics currently sit in `todo` / `in_progress`. Moving a card *is* changing the sprint, so there is nothing separate to keep in sync.

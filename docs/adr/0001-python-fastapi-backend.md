@@ -1,5 +1,7 @@
 # 0001 — Python + FastAPI backend
 
+> **Partly superseded by [0006](0006-dynamodb-single-table.md).** The Python/FastAPI choice stands; the SQLAlchemy + RDS persistence choice was replaced by DynamoDB.
+
 ## Context
 
 The project was originally specified as TypeScript across the full stack (see CLAUDE.md's first draft of the "Tech stack" section). Bar decided to deploy the system on AWS with a physically separated frontend and backend, and specified a Python/FastAPI backend as part of that architecture.

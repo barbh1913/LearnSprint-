@@ -29,12 +29,19 @@ class ActionProgressUpdate(BaseModel):
     isDone: bool
 
 
+class WeeklyCountOut(BaseModel):
+    weekStart: str
+    completed: int
+
+
 class VelocityOut(BaseModel):
     actionsCompletedThisWeek: int
     actionsCompletedLastWeek: int
     weeklyAverage: float
     averageMastery: float | None
     trend: str
+    history: list[WeeklyCountOut] = []
+    masteryDistribution: list[int] = []
 
 
 class SprintOut(BaseModel):
@@ -190,6 +197,11 @@ def get_velocity(user_id: str = Depends(get_current_user_id)) -> VelocityOut:
         weeklyAverage=velocity.weekly_average,
         averageMastery=velocity.average_mastery,
         trend=velocity.trend,
+        history=[
+            WeeklyCountOut(weekStart=week.week_start, completed=week.completed)
+            for week in velocity.history
+        ],
+        masteryDistribution=list(velocity.mastery_distribution),
     )
 
 
