@@ -4,6 +4,14 @@ This document is the contract between Bar (the student) and the agent. Every cod
 
 See also [ABOUT.md](ABOUT.md) for the personal context and goal behind this project.
 
+## The point of the product (read this before designing anything)
+
+LearnSprint applies **Scrum to studying**. The unit of planning is a **one-week sprint**: the student commits to a defined set of material, and the system tells them *upfront* whether that commitment actually fits the hours they have left after work and lectures.
+
+That's the whole value. Not "a calendar with tasks on it" — the difference is that **over-commitment is visible before the week starts, not discovered after it fails**. Capacity is real free hours (constraints applied), commitment is explicit (topics pulled from Backlog into To do), and the gap between them is the number the student plans against.
+
+Every feature should be judged against that: does it help the student decide what fits in this week, and then execute it? Topic extraction exists to size the material. The mastery-weighted algorithm exists to spend the committed hours well. The board exists to make the commitment visible. If a feature doesn't serve the sprint loop, it's out of scope.
+
 ## What the system is
 
 LearnSprint is an academic learning planner built around Agile/Scrum planning concepts: the student enters courses and time constraints, uploads study material (PDF/PPTX), the system extracts a list of topics from it into a **Sprint Backlog**, auto-generates three learning actions per topic (read/summarize/quiz), and builds a personal schedule that accounts for the student's mastery level per topic and the time left before the exam. Progress is tracked on a Kanban-style Sprint board (section 4).
@@ -37,7 +45,8 @@ The system is a physically separated frontend and backend, deployed serverless o
 - **FR1.4** — Two views: a focused single-course view, and a global view aggregating all courses in a semester.
 
 ### 2. Content analysis & topic management
-- **FR2.1** — Extract a list of topics from an uploaded PDF/PPTX file, supporting Hebrew and English.
+- **FR2.1** — Extract a list of topics from uploaded PDF/PPTX course material, supporting Hebrew and English. Up to 15 files can be uploaded at once and are analysed together as one corpus, so a semester of decks yields one de-duplicated topic list.
+- **FR2.7** — Optional AI analysis: the student may enable it in their profile by supplying **their own** Anthropic API key. When on, uploaded material is analysed by Claude to identify topics *and estimate the study time each one needs*; the per-topic estimate replaces the fixed default durations. The key is stored per-user, never returned to the frontend, and never logged. If AI is off or the call fails for any reason, the keyword heuristic runs instead — an AI outage must never block an upload.
 - **FR2.2** — Full editing of the extracted topic list: add, delete, rename.
 - **FR2.3** — Each topic automatically gets 3 learning actions: read, summarize, quiz.
 - **FR2.4** — Let the user rate their "mastery level" per topic, on a 1–5 scale.
@@ -49,7 +58,11 @@ The system is a physically separated frontend and backend, deployed serverless o
 - **FR3.2** — A "general review session" before the exam, with **dynamic time allocation**: the lower the mastery level of a topic, the larger the time share it gets in the review session. This is the project's core algorithm (the "Algorithms" grading section) — document it thoroughly and cover it with unit tests.
 - **FR3.3** — Define exam type (open material / formula sheet). If applicable, allocate dedicated time for preparing those aids.
 
-### 4. Sprint board
+### 4. Sprint planning (the core loop)
+- **FR4.0** — A sprint is one calendar week (Sunday–Saturday). The system shows, for the current sprint: **capacity** (free study minutes left this week, derived from `UserConstraints` using the same window calculation the scheduler uses), **commitment** (total remaining action time for topics in `To do` / `In progress`), and the gap between them. Topics in `Backlog` are explicitly *not* part of the commitment.
+- **FR4.0.1** — The sprint is classified and surfaced as `empty` / `healthy` / `tight` / `over_committed` / `no_capacity`, so the student sees an over-commitment *before* the week starts rather than discovering it mid-week. This is the product's central promise (see "The point of the product" above).
+
+### 4b. Sprint board
 - **FR4.1** — The system displays an interactive Kanban board (per course, and globally across courses per FR1.4), with columns `Backlog`, `To Do`, `In Progress`, `Needs Review`, `Done`, showing every topic's current status and, for the in-progress one(s), which learning action is active.
 - **FR4.2** — Status is derived automatically by default: a topic starts at `Backlog` on extraction (FR2.1), moves to `To Do` once pulled into the active study plan, to `In Progress` once its first learning action is started, and once all three actions (FR2.3) are marked done, the system prompts for a mastery rating (FR2.4) and sets the topic to `Needs Review` (mastery ≤ 2) or `Done` (mastery ≥ 3).
 - **FR4.3** — The student can also manually drag a card between columns to override the automatic status — e.g. pulling a topic from `Backlog` into `To Do` to plan it in, or dragging a `Done` topic back to `Needs Review` to redo it. A manual drag persists until the next automatic trigger (an action completed, a mastery rating given) fires and recomputes status normally.

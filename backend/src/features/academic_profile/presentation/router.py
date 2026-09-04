@@ -11,6 +11,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from features.academic_profile.application.schemas import (
+    AiSettingsIn,
+    AiSettingsOut,
     AverageOut,
     ConstraintsIn,
     ConstraintsOut,
@@ -20,6 +22,7 @@ from features.academic_profile.application.schemas import (
     GradesOut,
     GradeUpdate,
 )
+from features.content_topics.infrastructure.ai_extractor import verify_api_key
 from features.academic_profile.domain.grades import (
     AverageBreakdown,
     GradedCourse,
@@ -129,6 +132,51 @@ def save_constraints(
     return ConstraintsOut(
         blockedSlots=saved["blockedSlots"], timePreference=saved["timePreference"]
     )
+
+
+@router.get("/ai-settings", response_model=AiSettingsOut)
+def get_ai_settings(user_id: str = Depends(get_current_user_id)) -> AiSettingsOut:
+    """Whether AI analysis is on, and a masked hint. The key itself never leaves the server."""
+    stored = repository.get_ai_settings(user_id)
+    return AiSettingsOut(
+        aiEnabled=bool(stored.get("aiEnabled")),
+        hasApiKey=bool(stored.get("apiKey")),
+        keyHint=_mask_key(stored.get("apiKey")),
+    )
+
+
+@router.put("/ai-settings", response_model=AiSettingsOut)
+def save_ai_settings(
+    payload: AiSettingsIn, user_id: str = Depends(get_current_user_id)
+) -> AiSettingsOut:
+    """Turn AI analysis on/off and store the student's own key.
+
+    An omitted apiKey means "keep the one I already saved", so the frontend never
+    has to hold the real key just to toggle the feature.
+    """
+    existing = repository.get_ai_settings(user_id)
+    api_key = payload.apiKey if payload.apiKey is not None else existing.get("apiKey")
+
+    if payload.aiEnabled and not api_key:
+        raise HTTPException(
+            status_code=422, detail="An Anthropic API key is required to enable AI analysis"
+        )
+
+    if payload.aiEnabled and payload.apiKey and not verify_api_key(payload.apiKey):
+        raise HTTPException(status_code=422, detail="That API key was rejected by Anthropic")
+
+    saved = repository.save_ai_settings(user_id, enabled=payload.aiEnabled, api_key=api_key)
+
+    return AiSettingsOut(
+        aiEnabled=bool(saved["aiEnabled"]),
+        hasApiKey=bool(saved.get("apiKey")),
+        keyHint=_mask_key(saved.get("apiKey")),
+    )
+
+
+def _mask_key(api_key: str | None) -> str | None:
+    """Show only the last 4 characters, so the student can tell which key is stored."""
+    return f"...{api_key[-4:]}" if api_key else None
 
 
 def _require_membership(user_id: str, course_id: str) -> dict[str, Any]:

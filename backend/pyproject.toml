@@ -16,6 +16,7 @@ dependencies = [
     "pypdf>=5.1",
     "python-pptx>=1.0",
     "python-multipart>=0.0.20",
+    "anthropic>=0.69",
 ]
 
 [project.optional-dependencies]

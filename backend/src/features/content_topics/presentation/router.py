@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from features.academic_profile.infrastructure import repository as course_repo
 from features.content_topics.domain.extraction import extract_topics
+from features.content_topics.infrastructure import ai_extractor
 from features.content_topics.infrastructure import file_parser
 from features.content_topics.infrastructure import repository
 from features.progress.infrastructure import repository as progress_repo
@@ -17,6 +18,7 @@ from shared.auth.dependencies import get_current_user_id
 router = APIRouter(tags=["content-topics"])
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_FILES_PER_UPLOAD = 15
 
 
 class TopicCreate(BaseModel):
@@ -39,7 +41,10 @@ class TopicOut(BaseModel):
 class ExtractionResult(BaseModel):
     created: list[TopicOut]
     detectedLanguage: str
-    sourceFilename: str
+    sourceFilenames: list[str]
+    analysedBy: str  # "ai" or "heuristic"
+    totalEstimatedMinutes: int
+    note: str | None = None
 
 
 @router.post(
@@ -47,41 +52,114 @@ class ExtractionResult(BaseModel):
     response_model=ExtractionResult,
     status_code=status.HTTP_201_CREATED,
 )
-async def extract_from_file(
+async def extract_from_files(
     course_id: str,
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(...),
     user_id: str = Depends(get_current_user_id),
 ) -> ExtractionResult:
-    """Read a PDF/PPTX, pick out the topics, and create them with their actions."""
+    """Analyse a batch of course files into topics with study-time estimates.
+
+    Accepts up to 15 PDF/PPTX files at once and treats them as one corpus, so a
+    whole semester of lecture decks produces a single de-duplicated topic list
+    rather than one per file.
+
+    If the student enabled AI analysis and stored their API key, Claude reads the
+    material and estimates how long each topic takes to learn. Otherwise - or if
+    the AI call fails for any reason - the keyword heuristic runs instead and the
+    default per-action durations apply. Either way the upload succeeds.
+    """
     _require_membership(user_id, course_id)
 
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="File is larger than 20 MB")
-
-    try:
-        lines = file_parser.read_lines(file.filename or "", content)
-    except file_parser.UnsupportedFileType as exc:
-        raise HTTPException(status_code=400, detail="Only PDF and PPTX files are supported") from exc
-    except Exception as exc:  # noqa: BLE001 - a corrupt upload shouldn't 500
-        raise HTTPException(status_code=400, detail="Could not read that file") from exc
-
-    extracted = extract_topics(lines)
-    if not extracted:
+    if len(files) > MAX_FILES_PER_UPLOAD:
         raise HTTPException(
-            status_code=422,
-            detail="No topics could be found in that file. Try another file or add topics manually.",
+            status_code=413,
+            detail=f"Upload at most {MAX_FILES_PER_UPLOAD} files at a time",
         )
 
-    created = [repository.create_topic(course_id, topic.name) for topic in extracted]
-    languages = {topic.language for topic in extracted}
+    lines, filenames = await _read_all(files)
+    if not lines:
+        raise HTTPException(status_code=422, detail="Those files had no readable text")
+
+    ai_settings = course_repo.get_ai_settings(user_id)
+    topics, analysed_by, note = _analyse(lines, ai_settings)
+
+    if not topics:
+        raise HTTPException(
+            status_code=422,
+            detail="No topics could be found. Try different files or add topics manually.",
+        )
+
+    created = [
+        repository.create_topic(course_id, name, total_minutes=minutes)
+        for name, minutes, _ in topics
+    ]
+    languages = {language for _, _, language in topics}
 
     return ExtractionResult(
         created=[_to_out(topic) for topic in created],
         # Names stay in their source language - we never translate (see CLAUDE.md).
         detectedLanguage="mixed" if len(languages) > 1 else languages.pop(),
-        sourceFilename=file.filename or "",
+        sourceFilenames=filenames,
+        analysedBy=analysed_by,
+        totalEstimatedMinutes=sum(minutes or 0 for _, minutes, _ in topics),
+        note=note,
     )
+
+
+async def _read_all(files: list[UploadFile]) -> tuple[list[str], list[str]]:
+    """Pull the text out of every uploaded file, concatenated in upload order."""
+    lines: list[str] = []
+    filenames: list[str] = []
+
+    for upload in files:
+        content = await upload.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413, detail=f"{upload.filename} is larger than 20 MB"
+            )
+
+        try:
+            lines.extend(file_parser.read_lines(upload.filename or "", content))
+        except file_parser.UnsupportedFileType as exc:
+            raise HTTPException(
+                status_code=400, detail="Only PDF and PPTX files are supported"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - a corrupt upload shouldn't 500
+            raise HTTPException(
+                status_code=400, detail=f"Could not read {upload.filename}"
+            ) from exc
+
+        filenames.append(upload.filename or "")
+
+    return lines, filenames
+
+
+def _analyse(
+    lines: list[str], ai_settings: dict[str, Any]
+) -> tuple[list[tuple[str, int | None, str]], str, str | None]:
+    """Run AI analysis when it's enabled, otherwise the heuristic.
+
+    Returns (topics, which analyser ran, an optional note for the student).
+    The AI path is never allowed to fail the upload.
+    """
+    if ai_settings.get("aiEnabled") and ai_settings.get("apiKey"):
+        try:
+            analysed = ai_extractor.analyse_syllabus(lines, api_key=ai_settings["apiKey"])
+            return (
+                [(topic.name, topic.estimated_minutes, topic.language) for topic in analysed],
+                "ai",
+                None,
+            )
+        except ai_extractor.AiAnalysisUnavailable as exc:
+            note = f"AI analysis was unavailable ({exc}), so the built-in analyser ran instead."
+            return _heuristic(lines) + (note,)
+
+    return _heuristic(lines) + (None,)
+
+
+def _heuristic(lines: list[str]) -> tuple[list[tuple[str, int | None, str]], str]:
+    extracted = extract_topics(lines)
+    return [(topic.name, None, topic.language) for topic in extracted], "heuristic"
 
 
 @router.post(

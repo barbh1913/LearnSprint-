@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Star } from 'lucide-react'
 import { api } from '../api/client'
-import type { Board, BoardCard, Course, TopicStatus } from '../types'
+import type { Board, BoardCard, Course, Sprint, TopicStatus } from '../types'
 import { ACTION_LABELS, STATUS_LABELS, STATUS_ORDER } from '../types'
+import { SprintHeader } from '../components/SprintHeader'
 import {
   Badge,
   EmptyState,
@@ -25,6 +26,7 @@ import { cn } from '../lib/utils'
  */
 export function BoardPage() {
   const [board, setBoard] = useState<Board | null>(null)
+  const [sprint, setSprint] = useState<Sprint | null>(null)
   const [courses, setCourses] = useState<Course[]>([])
   const [courseFilter, setCourseFilter] = useState('')
   const [draggedCard, setDraggedCard] = useState<BoardCard | null>(null)
@@ -34,12 +36,14 @@ export function BoardPage() {
 
   const load = useCallback(async () => {
     try {
-      const [loadedBoard, loadedCourses] = await Promise.all([
+      const [loadedBoard, loadedCourses, loadedSprint] = await Promise.all([
         api.getBoard(courseFilter || undefined),
         api.listCourses(),
+        api.getSprint(),
       ])
       setBoard(loadedBoard)
       setCourses(loadedCourses)
+      setSprint(loadedSprint)
       setError('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load the board')
@@ -106,6 +110,8 @@ export function BoardPage() {
       />
 
       {error && <ErrorNote message={error} />}
+
+      {sprint && !courseFilter && <SprintHeader sprint={sprint} />}
 
       {board && board.totalTopics === 0 ? (
         <EmptyState

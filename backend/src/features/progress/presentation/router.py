@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,8 +11,10 @@ from pydantic import BaseModel, Field
 from features.academic_profile.infrastructure import repository as course_repo
 from features.content_topics.infrastructure import repository as topic_repo
 from features.progress.application import board_service
+from features.progress.domain import sprint
 from features.progress.domain import status as status_rules
 from features.progress.infrastructure import repository
+from features.scheduling.domain.models import BlockedSlot, TimePreference
 from shared.auth.dependencies import get_current_user_id
 
 router = APIRouter(tags=["progress"])
@@ -33,6 +35,21 @@ class VelocityOut(BaseModel):
     weeklyAverage: float
     averageMastery: float | None
     trend: str
+
+
+class SprintOut(BaseModel):
+    """This week's commitment measured against the hours actually available."""
+
+    startsAt: str
+    endsAt: str
+    daysRemaining: int
+    capacityMinutes: int
+    committedMinutes: int
+    completedMinutes: int
+    remainingCapacityMinutes: int
+    topicCount: int
+    backlogCount: int
+    status: str  # empty | healthy | tight | over_committed | no_capacity
 
 
 @router.get("/board")
@@ -91,6 +108,61 @@ def update_action_progress(
     return {"actionId": action_id, "isDone": payload.isDone, "topicId": action["topicId"]}
 
 
+@router.get("/sprint", response_model=SprintOut)
+def get_sprint(user_id: str = Depends(get_current_user_id)) -> SprintOut:
+    """This week's sprint: what was committed, and whether it fits the free hours.
+
+    Committed = topics the student pulled into To do / In progress. Everything
+    still in Backlog is explicitly *not* part of this week's commitment.
+    """
+    board = board_service.build_board(user_id)
+    constraints = course_repo.get_constraints(user_id)
+
+    committed_cards = [
+        card
+        for card in board["cards"]
+        if card["status"] in (status_rules.TODO, status_rules.IN_PROGRESS)
+    ]
+
+    # Only the unfinished actions still cost time this week.
+    committed_minutes = sum(
+        action["durationMinutes"]
+        for card in committed_cards
+        for action in card["actions"]
+        if not action["isDone"]
+    )
+    completed_minutes = sum(
+        action["durationMinutes"]
+        for card in committed_cards
+        for action in card["actions"]
+        if action["isDone"]
+    )
+
+    plan = sprint.build_sprint_plan(
+        now=datetime.now(),
+        blocked_slots=[_to_blocked_slot(slot) for slot in constraints.get("blockedSlots", [])],
+        time_preference=TimePreference(constraints.get("timePreference", "evening")),
+        committed_minutes=committed_minutes,
+        completed_minutes=completed_minutes,
+        topic_count=len(committed_cards),
+    )
+
+    return SprintOut(
+        startsAt=plan.window.start.isoformat(),
+        endsAt=plan.window.end.isoformat(),
+        daysRemaining=plan.window.days_remaining,
+        capacityMinutes=plan.capacity_minutes,
+        committedMinutes=plan.committed_minutes,
+        completedMinutes=plan.completed_minutes,
+        remainingCapacityMinutes=plan.remaining_capacity_minutes,
+        topicCount=plan.topic_count,
+        status=plan.status,
+        backlogCount=sum(
+            1 for card in board["cards"] if card["status"] == status_rules.BACKLOG
+        ),
+    )
+
+
 @router.get("/velocity", response_model=VelocityOut)
 def get_velocity(user_id: str = Depends(get_current_user_id)) -> VelocityOut:
     completed = [
@@ -126,3 +198,13 @@ def _require_membership(user_id: str, course_id: str) -> dict[str, Any]:
     if membership is None:
         raise HTTPException(status_code=403, detail="You do not have access to this course")
     return membership
+
+
+def _to_blocked_slot(slot: dict[str, Any]) -> BlockedSlot:
+    hour, _, minute = str(slot["startTime"]).partition(":")
+    end_hour, _, end_minute = str(slot["endTime"]).partition(":")
+    return BlockedSlot(
+        day_of_week=int(slot["day"]),
+        start_time=time(int(hour), int(minute or 0)),
+        end_time=time(int(end_hour), int(end_minute or 0)),
+    )

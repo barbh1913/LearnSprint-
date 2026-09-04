@@ -2,18 +2,30 @@
 // the auth header and error handling live in exactly one place.
 
 import type {
+  AiSettings,
   Board,
   Course,
   ExamType,
   Grades,
   MasteryLevel,
   Schedule,
+  Sprint,
   Topic,
   TopicStatus,
   User,
   UserConstraints,
   Velocity,
 } from '../types'
+
+/** Result of analysing a batch of uploaded course files. */
+export interface ExtractionResult {
+  created: Topic[]
+  detectedLanguage: string
+  sourceFilenames: string[]
+  analysedBy: 'ai' | 'heuristic'
+  totalEstimatedMinutes: number
+  note: string | null
+}
 
 const TOKEN_KEY = 'learnsprint.token'
 
@@ -144,14 +156,27 @@ export const api = {
   deleteTopic: (courseId: string, topicId: string) =>
     request<void>(`/courses/${courseId}/topics/${topicId}`, { method: 'DELETE' }),
 
-  extractTopics: (courseId: string, file: File) => {
+  /** Upload up to 15 files at once; they're analysed together as one corpus. */
+  extractTopics: (courseId: string, files: File[]) => {
     const body = new FormData()
-    body.append('file', file)
-    return request<{ created: Topic[]; detectedLanguage: string; sourceFilename: string }>(
-      `/courses/${courseId}/topics/extract`,
-      { method: 'POST', body },
-    )
+    for (const file of files) {
+      body.append('files', file)
+    }
+    return request<ExtractionResult>(`/courses/${courseId}/topics/extract`, {
+      method: 'POST',
+      body,
+    })
   },
+
+  getSprint: () => request<Sprint>('/sprint'),
+
+  getAiSettings: () => request<AiSettings>('/ai-settings'),
+
+  saveAiSettings: (settings: { aiEnabled: boolean; apiKey?: string }) =>
+    request<AiSettings>('/ai-settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
 
   getBoard: (courseId?: string) =>
     request<Board>(courseId ? `/board?courseId=${courseId}` : '/board'),
@@ -173,6 +198,23 @@ export const api = {
     ),
 
   getSchedule: (courseId: string) => request<Schedule>(`/courses/${courseId}/schedule`),
+
+  /** Downloads the plan as .ics so it can be imported into Google Calendar. */
+  downloadScheduleIcs: async (courseId: string, courseName: string) => {
+    const response = await fetch(`/api/courses/${courseId}/schedule.ics`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (!response.ok) {
+      throw new ApiError(await readErrorMessage(response), response.status)
+    }
+
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${courseName.replace(/\s+/g, '-').toLowerCase()}.ics`
+    link.click()
+    URL.revokeObjectURL(url)
+  },
 
   getVelocity: () => request<Velocity>('/velocity'),
 }

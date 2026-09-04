@@ -16,9 +16,24 @@ from shared import dynamo
 DEFAULT_DURATIONS = {"read": 60, "summarize": 45, "quiz": 30}
 ACTION_TYPES = ("read", "summarize", "quiz")
 
+# When we have a total study estimate for a topic (from the AI analysis), this is
+# how it splits across the three actions - reading dominates, the quiz is a check.
+DURATION_SPLIT = {"read": 0.5, "summarize": 0.3, "quiz": 0.2}
+MIN_ACTION_MINUTES = 10
 
-def create_topic(course_id: str, name: str, *, is_priority: bool = False) -> dict[str, Any]:
-    """Create a topic and its three learning actions (FR2.3)."""
+
+def create_topic(
+    course_id: str,
+    name: str,
+    *,
+    is_priority: bool = False,
+    total_minutes: int | None = None,
+) -> dict[str, Any]:
+    """Create a topic and its three learning actions (FR2.3).
+
+    `total_minutes` is the estimated study time for the whole topic; when given
+    it is split across the actions instead of using the fixed defaults.
+    """
     topic_id = str(uuid.uuid4())
     topic = {
         "PK": dynamo.course_pk(course_id),
@@ -32,9 +47,18 @@ def create_topic(course_id: str, name: str, *, is_priority: bool = False) -> dic
     dynamo.put_item(topic)
 
     for action_type in ACTION_TYPES:
-        _create_action(course_id, topic_id, action_type)
+        _create_action(
+            course_id, topic_id, action_type, _duration_for(action_type, total_minutes)
+        )
 
     return topic
+
+
+def _duration_for(action_type: str, total_minutes: int | None) -> int:
+    if total_minutes is None:
+        return DEFAULT_DURATIONS[action_type]
+
+    return max(MIN_ACTION_MINUTES, round(total_minutes * DURATION_SPLIT[action_type]))
 
 
 def list_topics(course_id: str) -> list[dict[str, Any]]:
@@ -67,7 +91,9 @@ def delete_topic(course_id: str, topic_id: str) -> None:
         dynamo.delete_item(item["PK"], item["SK"])
 
 
-def _create_action(course_id: str, topic_id: str, action_type: str) -> dict[str, Any]:
+def _create_action(
+    course_id: str, topic_id: str, action_type: str, duration_minutes: int
+) -> dict[str, Any]:
     action_id = str(uuid.uuid4())
     action = {
         "PK": dynamo.course_pk(course_id),
@@ -77,7 +103,7 @@ def _create_action(course_id: str, topic_id: str, action_type: str) -> dict[str,
         "topicId": topic_id,
         "courseId": course_id,
         "type": action_type,
-        "defaultDurationMinutes": DEFAULT_DURATIONS[action_type],
+        "defaultDurationMinutes": duration_minutes,
     }
     dynamo.put_item(action)
     return action

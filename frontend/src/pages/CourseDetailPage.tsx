@@ -49,19 +49,33 @@ export function CourseDetailPage() {
     load()
   }, [load])
 
-  async function handleUpload(file: File) {
+  async function handleUpload(files: File[]) {
     setIsUploading(true)
     setUploadNote('')
     setError('')
 
     try {
-      const result = await api.extractTopics(courseId, file)
+      const result = await api.extractTopics(courseId, files)
+      const hours = Math.round(result.totalEstimatedMinutes / 60)
+      const source =
+        result.sourceFilenames.length === 1
+          ? result.sourceFilenames[0]
+          : `${result.sourceFilenames.length} files`
+
       setUploadNote(
-        `Found ${result.created.length} topics in ${result.sourceFilename} (${result.detectedLanguage}). Edit anything that looks off.`,
+        [
+          `Found ${result.created.length} topics across ${source}`,
+          result.analysedBy === 'ai'
+            ? `AI estimated about ${hours}h of study time in total.`
+            : 'Using default time estimates — turn on AI analysis in your profile for real estimates.',
+          result.note,
+        ]
+          .filter(Boolean)
+          .join('. '),
       )
       await load()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not read that file')
+      setError(caught instanceof Error ? caught.message : 'Could not read those files')
     } finally {
       setIsUploading(false)
       if (fileInput.current) fileInput.current.value = ''
@@ -137,22 +151,27 @@ export function CourseDetailPage() {
       </Card>
 
       <Card className="mb-6">
-        <h2 className="mb-3 font-medium">Add topics</h2>
+        <h2 className="mb-1 font-medium">Add topics</h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          Upload up to 15 PDF or PPTX files at once — they're analysed together to work out
+          the topics and how long each takes to learn.
+        </p>
 
         <div className="flex flex-wrap items-center gap-3">
           <input
             ref={fileInput}
             type="file"
             accept=".pdf,.pptx"
+            multiple
             className="hidden"
             onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) handleUpload(file)
+              const files = Array.from(event.target.files ?? [])
+              if (files.length > 0) handleUpload(files)
             }}
           />
           <Button onClick={() => fileInput.current?.click()} disabled={isUploading}>
             <Upload className="size-4" aria-hidden />
-            {isUploading ? 'Reading file' : 'Upload PDF or PPTX'}
+            {isUploading ? 'Analysing material' : 'Upload course material'}
           </Button>
 
           <span className="text-sm text-muted-foreground">or</span>
@@ -172,9 +191,15 @@ export function CourseDetailPage() {
         </div>
 
         {uploadNote && (
-          <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-            {uploadNote}
-          </p>
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950">
+            <p className="text-sm text-emerald-900 dark:text-emerald-200">{uploadNote}</p>
+            <Link
+              to="/gantt"
+              className="mt-1 inline-block text-sm font-medium text-emerald-800 underline dark:text-emerald-300"
+            >
+              See the study sessions this created
+            </Link>
+          </div>
         )}
         {error && <div className="mt-3">{<ErrorNote message={error} />}</div>}
       </Card>

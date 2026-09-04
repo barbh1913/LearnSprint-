@@ -321,11 +321,89 @@ class TestUpload:
 
         response = client.post(
             f"/courses/{course['id']}/topics/extract",
-            files={"file": (filename, b"some text", "text/plain")},
+            files=[("files", (filename, b"some text", "text/plain"))],
             headers=headers,
         )
 
         assert response.status_code == 400
+
+    def test_too_many_files_are_rejected(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[
+                ("files", (f"deck{index}.pdf", b"%PDF-1.4", "application/pdf"))
+                for index in range(16)
+            ],
+            headers=headers,
+        )
+
+        assert response.status_code == 413
+
+
+class TestSprintEndpoint:
+    def test_empty_sprint_before_anything_is_planned(self) -> None:
+        sprint = client.get("/sprint", headers=auth_headers()).json()
+
+        assert sprint["status"] == "empty"
+        assert sprint["committedMinutes"] == 0
+
+    def test_pulling_a_topic_into_todo_commits_its_time(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Recursion"}, headers=headers
+        ).json()
+
+        client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"status": "todo"},
+            headers=headers,
+        )
+        sprint = client.get("/sprint", headers=headers).json()
+
+        # read 60 + summarize 45 + quiz 30
+        assert sprint["committedMinutes"] == 135
+        assert sprint["topicCount"] == 1
+
+    def test_backlog_topics_are_not_part_of_the_commitment(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Later"}, headers=headers)
+
+        sprint = client.get("/sprint", headers=headers).json()
+
+        assert sprint["committedMinutes"] == 0
+        assert sprint["backlogCount"] == 1
+
+    def test_over_committing_the_week_is_flagged(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        # Block every evening so capacity is near zero, then commit work anyway.
+        client.put(
+            "/constraints",
+            json={
+                "blockedSlots": [
+                    {"day": day, "startTime": "15:00", "endTime": "23:00"} for day in range(7)
+                ],
+                "timePreference": "evening",
+            },
+            headers=headers,
+        )
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Recursion"}, headers=headers
+        ).json()
+        client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"status": "todo"},
+            headers=headers,
+        )
+
+        sprint = client.get("/sprint", headers=headers).json()
+
+        assert sprint["status"] in ("over_committed", "no_capacity")
 
 
 def _add_topic_and_finish_actions(headers: dict[str, str], course_id: str, name: str) -> dict:

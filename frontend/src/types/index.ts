@@ -109,6 +109,26 @@ export interface Grades {
   courses: Course[]
 }
 
+/** This week's sprint: what was committed against the hours actually free. */
+export interface Sprint {
+  startsAt: string
+  endsAt: string
+  daysRemaining: number
+  capacityMinutes: number
+  committedMinutes: number
+  completedMinutes: number
+  remainingCapacityMinutes: number
+  topicCount: number
+  backlogCount: number
+  status: 'empty' | 'healthy' | 'tight' | 'over_committed' | 'no_capacity'
+}
+
+export interface AiSettings {
+  aiEnabled: boolean
+  hasApiKey: boolean
+  keyHint: string | null
+}
+
 export interface Velocity {
   actionsCompletedThisWeek: number
   actionsCompletedLastWeek: number

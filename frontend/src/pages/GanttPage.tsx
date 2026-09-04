@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Zap } from 'lucide-react'
+import { AlertTriangle, CalendarPlus, Zap } from 'lucide-react'
 import { api } from '../api/client'
 import type { Course, Schedule, ScheduleBlock } from '../types'
 import {
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorNote,
@@ -25,6 +26,21 @@ export function GanttPage() {
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(true)
+  const [isExporting, setIsExporting] = useState(false)
+
+  async function handleExport() {
+    const course = courses.find((item) => item.id === courseId)
+    if (!course) return
+
+    setIsExporting(true)
+    try {
+      await api.downloadScheduleIcs(course.id, course.name)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not export the plan')
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   useEffect(() => {
     api
@@ -65,19 +81,27 @@ export function GanttPage() {
         title="Study plan"
         subtitle="Generated from your blocked hours, the exam date, and how well you know each topic."
         action={
-          <Select
-            value={courseId}
-            onChange={(event) => setCourseId(event.target.value)}
-            className="w-52"
-            aria-label="Choose a course"
-          >
-            <option value="">Choose a course</option>
-            {courses.map((course) => (
-              <option key={course.id} value={course.id}>
-                {course.name}
-              </option>
-            ))}
-          </Select>
+          <div className="flex items-center gap-2">
+            {schedule?.feasible && schedule.blocks.length > 0 && (
+              <Button onClick={handleExport} disabled={isExporting}>
+                <CalendarPlus className="size-4" aria-hidden />
+                {isExporting ? 'Preparing' : 'Add to calendar'}
+              </Button>
+            )}
+            <Select
+              value={courseId}
+              onChange={(event) => setCourseId(event.target.value)}
+              className="w-52"
+              aria-label="Choose a course"
+            >
+              <option value="">Choose a course</option>
+              {courses.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.name}
+                </option>
+              ))}
+            </Select>
+          </div>
         }
       />
 
