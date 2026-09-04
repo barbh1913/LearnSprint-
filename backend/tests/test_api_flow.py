@@ -1,0 +1,343 @@
+"""End-to-end API tests covering the golden path.
+
+Register -> create course -> add topics -> tick actions -> rate mastery ->
+board updates -> schedule generates -> grades average. DynamoDB is faked in
+conftest.py, so this runs offline.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+import pytest
+from fastapi.testclient import TestClient
+
+from main import app
+
+client = TestClient(app)
+
+
+def auth_headers(email: str = "student@example.com") -> dict[str, str]:
+    response = client.post("/auth/register", json={"email": email, "password": "s3cret123"})
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def create_course(headers: dict[str, str], **overrides) -> dict:
+    payload = {
+        "name": "Data Structures",
+        "year": 2,
+        "semester": "A",
+        "credits": 5,
+        "examDate": (datetime.now() + timedelta(days=21)).isoformat(),
+        "examType": "closed",
+    }
+    payload.update(overrides)
+    return client.post("/courses", json=payload, headers=headers).json()
+
+
+class TestCourses:
+    def test_create_and_list_course(self) -> None:
+        headers = auth_headers()
+        created = create_course(headers)
+
+        courses = client.get("/courses", headers=headers).json()
+
+        assert created["name"] == "Data Structures"
+        assert [course["id"] for course in courses] == [created["id"]]
+
+    def test_courses_require_authentication(self) -> None:
+        assert client.get("/courses").status_code == 401
+
+    def test_another_user_cannot_see_my_course(self) -> None:
+        owner = auth_headers("owner@example.com")
+        course = create_course(owner)
+        stranger = auth_headers("stranger@example.com")
+
+        response = client.get(f"/courses/{course['id']}", headers=stranger)
+
+        assert response.status_code == 403
+
+    def test_delete_course_removes_it_from_the_list(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+
+        assert client.delete(f"/courses/{course['id']}", headers=headers).status_code == 204
+        assert client.get("/courses", headers=headers).json() == []
+
+
+class TestGrades:
+    def test_weighted_average_favours_heavier_courses(self) -> None:
+        headers = auth_headers()
+        big = create_course(headers, name="Big", credits=10)
+        small = create_course(headers, name="Small", credits=2)
+
+        client.put(f"/courses/{big['id']}/grade", json={"finalGrade": 90}, headers=headers)
+        client.put(f"/courses/{small['id']}/grade", json={"finalGrade": 60}, headers=headers)
+
+        grades = client.get("/grades", headers=headers).json()
+
+        # (90*10 + 60*2) / 12 = 85, not the naive 75.
+        assert grades["overall"]["average"] == 85.0
+
+    def test_average_is_none_before_any_grade_is_entered(self) -> None:
+        headers = auth_headers()
+        create_course(headers)
+
+        grades = client.get("/grades", headers=headers).json()
+
+        assert grades["overall"]["average"] is None
+
+
+class TestTopicsAndBoard:
+    def test_new_topic_gets_three_learning_actions(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+
+        client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Binary Trees"}, headers=headers
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        card = board["cards"][0]
+        assert {action["type"] for action in card["actions"]} == {"read", "summarize", "quiz"}
+
+    def test_topic_starts_in_backlog(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Graphs"}, headers=headers)
+
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "backlog"
+
+    def test_completing_one_action_moves_topic_to_in_progress(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Graphs"}, headers=headers)
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+        action_id = board["cards"][0]["actions"][0]["id"]
+
+        client.patch(
+            f"/actions/{action_id}/progress?courseId={course['id']}",
+            json={"isDone": True},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "in_progress"
+
+    def test_all_actions_done_prompts_for_mastery(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        card = _add_topic_and_finish_actions(headers, course["id"], "Sorting")
+
+        assert card["needsMasteryRating"] is True
+        assert card["status"] == "in_progress"
+
+    def test_low_mastery_sends_topic_to_needs_review(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        card = _add_topic_and_finish_actions(headers, course["id"], "Sorting")
+
+        client.patch(
+            f"/topics/{card['topicId']}/progress?courseId={course['id']}",
+            json={"masteryLevel": 2},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "needs_review"
+
+    def test_high_mastery_completes_the_topic(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        card = _add_topic_and_finish_actions(headers, course["id"], "Sorting")
+
+        client.patch(
+            f"/topics/{card['topicId']}/progress?courseId={course['id']}",
+            json={"masteryLevel": 5},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "done"
+
+    def test_dragging_a_card_sets_its_status(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=headers
+        ).json()
+
+        client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"status": "todo"},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "todo"
+
+    def test_unknown_status_is_rejected(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=headers
+        ).json()
+
+        response = client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"status": "not-a-real-status"},
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_global_board_spans_every_course(self) -> None:
+        headers = auth_headers()
+        first = create_course(headers, name="Algorithms")
+        second = create_course(headers, name="Databases")
+        client.post(f"/courses/{first['id']}/topics", json={"name": "Sorting"}, headers=headers)
+        client.post(f"/courses/{second['id']}/topics", json={"name": "Indexes"}, headers=headers)
+
+        board = client.get("/board", headers=headers).json()
+
+        assert board["totalTopics"] == 2
+        assert {card["courseName"] for card in board["cards"]} == {"Algorithms", "Databases"}
+
+    def test_renaming_and_prioritising_a_topic(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Old name"}, headers=headers
+        ).json()
+
+        updated = client.patch(
+            f"/courses/{course['id']}/topics/{topic['id']}",
+            json={"name": "New name", "isPriority": True},
+            headers=headers,
+        ).json()
+
+        assert updated["name"] == "New name"
+        assert updated["isPriority"] is True
+
+
+class TestSchedule:
+    def test_schedule_covers_the_topics(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Recursion"}, headers=headers)
+
+        schedule = client.get(f"/courses/{course['id']}/schedule", headers=headers).json()
+
+        assert schedule["feasible"] is True
+        assert len(schedule["blocks"]) > 0
+
+    def test_schedule_needs_an_exam_date(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers, examDate=None)
+
+        response = client.get(f"/courses/{course['id']}/schedule", headers=headers)
+
+        assert response.status_code == 400
+
+    def test_blocked_hours_are_respected(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Recursion"}, headers=headers)
+        client.put(
+            "/constraints",
+            json={
+                "blockedSlots": [{"day": 0, "startTime": "15:00", "endTime": "23:00"}],
+                "timePreference": "evening",
+            },
+            headers=headers,
+        )
+
+        schedule = client.get(f"/courses/{course['id']}/schedule", headers=headers).json()
+
+        mondays = [
+            block
+            for block in schedule["blocks"]
+            if datetime.fromisoformat(block["start"]).weekday() == 0
+        ]
+        assert mondays == []
+
+    def test_imminent_exam_switches_to_emergency_mode(self) -> None:
+        headers = auth_headers()
+        course = create_course(
+            headers, examDate=(datetime.now() + timedelta(hours=6)).isoformat()
+        )
+        for name in ("A", "B", "C"):
+            client.post(f"/courses/{course['id']}/topics", json={"name": name}, headers=headers)
+
+        schedule = client.get(f"/courses/{course['id']}/schedule", headers=headers).json()
+
+        assert schedule["feasible"] is False or schedule["isEmergencyMode"] is True
+
+
+class TestVelocity:
+    def test_velocity_counts_completed_actions(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        _add_topic_and_finish_actions(headers, course["id"], "Sorting")
+
+        velocity = client.get("/velocity", headers=headers).json()
+
+        assert velocity["actionsCompletedThisWeek"] == 3
+
+    def test_velocity_is_zero_for_a_new_account(self) -> None:
+        velocity = client.get("/velocity", headers=auth_headers()).json()
+
+        assert velocity["actionsCompletedThisWeek"] == 0
+        assert velocity["averageMastery"] is None
+
+
+class TestConstraints:
+    def test_constraints_round_trip(self) -> None:
+        headers = auth_headers()
+        payload = {
+            "blockedSlots": [{"day": 2, "startTime": "09:00", "endTime": "17:00"}],
+            "timePreference": "morning",
+        }
+
+        client.put("/constraints", json=payload, headers=headers)
+        stored = client.get("/constraints", headers=headers).json()
+
+        assert stored["timePreference"] == "morning"
+        assert stored["blockedSlots"][0]["day"] == 2
+
+    def test_defaults_before_anything_is_saved(self) -> None:
+        stored = client.get("/constraints", headers=auth_headers()).json()
+
+        assert stored["blockedSlots"] == []
+
+
+class TestUpload:
+    @pytest.mark.parametrize("filename", ["notes.txt", "notes.docx"])
+    def test_unsupported_file_types_are_rejected(self, filename: str) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files={"file": (filename, b"some text", "text/plain")},
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+
+
+def _add_topic_and_finish_actions(headers: dict[str, str], course_id: str, name: str) -> dict:
+    """Create a topic and mark all three of its actions done. Returns the board card."""
+    client.post(f"/courses/{course_id}/topics", json={"name": name}, headers=headers)
+    board = client.get(f"/board?courseId={course_id}", headers=headers).json()
+
+    for action in board["cards"][0]["actions"]:
+        client.patch(
+            f"/actions/{action['id']}/progress?courseId={course_id}",
+            json={"isDone": True},
+            headers=headers,
+        )
+
+    return client.get(f"/board?courseId={course_id}", headers=headers).json()["cards"][0]
