@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "backend",
+      "runtimeExecutable": "backend\\.venv\\Scripts\\uvicorn.exe",
+      "runtimeArgs": ["main:app", "--app-dir", "backend/src", "--reload", "--port", "8000"],
+      "port": 8000
+    },
+    {
       "name": "frontend",
       "runtimeExecutable": "npm.cmd",
       "runtimeArgs": ["run", "dev"],

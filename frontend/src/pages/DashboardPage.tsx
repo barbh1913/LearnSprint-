@@ -111,7 +111,10 @@ export function DashboardPage() {
 
                   <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
                     <Figure label="Free left" value={formatHours(Math.max(0, sprint.remainingCapacityMinutes))} />
-                    <Figure label="Days left" value={String(sprint.daysRemaining)} />
+                    <Figure
+                      label={sprint.daysRemaining === 1 ? 'day left' : 'days left'}
+                      value={String(sprint.daysRemaining)}
+                    />
                     <Figure label="In backlog" value={String(sprint.backlogCount)} />
                   </div>
                 </div>

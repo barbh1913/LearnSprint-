@@ -63,7 +63,7 @@ export function SprintHeader({ sprint }: { sprint: Sprint }) {
         <p className="text-sm text-muted-foreground">
           {sprint.daysRemaining === 0
             ? 'Last day of the sprint'
-            : `${sprint.daysRemaining} days left`}
+            : `${sprint.daysRemaining} day${sprint.daysRemaining === 1 ? '' : 's'} left`}
         </p>
       </div>
 
