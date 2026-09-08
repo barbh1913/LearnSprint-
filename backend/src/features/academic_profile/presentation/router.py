@@ -22,7 +22,6 @@ from features.academic_profile.application.schemas import (
     GradesOut,
     GradeUpdate,
 )
-from features.content_topics.infrastructure.ai_extractor import verify_api_key
 from features.academic_profile.domain.grades import (
     AverageBreakdown,
     GradedCourse,
@@ -30,6 +29,9 @@ from features.academic_profile.domain.grades import (
     overall_average,
 )
 from features.academic_profile.infrastructure import repository
+from features.content_topics.infrastructure import repository as topic_repo
+from features.progress.infrastructure import repository as progress_repo
+from shared.ai_client import verify_api_key
 from shared.auth.dependencies import get_current_user_id
 
 router = APIRouter(tags=["academic-profile"])
@@ -61,6 +63,12 @@ def update_course(
     course_id: str, payload: CourseUpdate, user_id: str = Depends(get_current_user_id)
 ) -> CourseOut:
     membership = _require_membership(user_id, course_id)
+    # Unlike topics (FR5.2 - shared, any member edits), course fields like the
+    # exam date drive every member's own generated schedule - only the owner
+    # changes them, the same restriction delete_course already has.
+    if membership["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Only the course owner can edit it")
+
     course = repository.update_course(course_id, payload.model_dump(exclude_unset=True))
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -74,7 +82,27 @@ def delete_course(course_id: str, user_id: str = Depends(get_current_user_id)) -
     if membership["role"] != "owner":
         raise HTTPException(status_code=403, detail="Only the course owner can delete it")
 
+    _delete_all_members_progress(course_id)
     repository.delete_course(course_id)
+
+
+def _delete_all_members_progress(course_id: str) -> None:
+    """Clean up every member's private progress rows before the shared topics
+    they point at disappear - otherwise they'd sit orphaned in DynamoDB forever,
+    under a partition (PK=USER#<id>) this delete never otherwise touches.
+    """
+    action_ids_by_topic: dict[str, list[str]] = {}
+    for action in topic_repo.list_actions(course_id):
+        action_ids_by_topic.setdefault(action["topicId"], []).append(action["id"])
+
+    topic_ids = [topic["id"] for topic in topic_repo.list_topics(course_id)]
+    member_ids = [member["userId"] for member in repository.list_course_members(course_id)]
+
+    for member_id in member_ids:
+        for topic_id in topic_ids:
+            progress_repo.delete_topic_progress(
+                member_id, topic_id, action_ids_by_topic.get(topic_id, [])
+            )
 
 
 @router.put("/courses/{course_id}/grade", response_model=CourseOut)

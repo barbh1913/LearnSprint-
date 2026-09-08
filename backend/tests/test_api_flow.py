@@ -64,6 +64,67 @@ class TestCourses:
         assert client.delete(f"/courses/{course['id']}", headers=headers).status_code == 204
         assert client.get("/courses", headers=headers).json() == []
 
+    def test_owner_can_update_the_course(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+
+        response = client.patch(
+            f"/courses/{course['id']}", json={"name": "Renamed"}, headers=headers
+        )
+
+        assert response.status_code == 200
+        assert response.json()["name"] == "Renamed"
+
+    def test_a_member_cannot_update_the_course(self) -> None:
+        # Unlike topics, course fields like the exam date drive every member's
+        # own schedule - only the owner changes them.
+        owner = auth_headers("owner@example.com")
+        peer = auth_headers("peer@example.com")
+        course = create_course(owner)
+        client.post(
+            f"/courses/{course['id']}/members", json={"email": "peer@example.com"}, headers=owner
+        )
+
+        response = client.patch(
+            f"/courses/{course['id']}", json={"name": "Hijacked"}, headers=peer
+        )
+
+        assert response.status_code == 403
+        assert client.get(f"/courses/{course['id']}", headers=owner).json()["name"] != "Hijacked"
+
+    def test_deleting_a_course_cleans_up_every_members_progress(self, fake_dynamo) -> None:
+        # Progress rows are private, under each member's own USER# partition -
+        # deleting the shared course must not leave them orphaned there forever.
+        owner = auth_headers("owner@example.com")
+        peer = auth_headers("peer@example.com")
+        course = create_course(owner)
+        client.post(
+            f"/courses/{course['id']}/members", json={"email": "peer@example.com"}, headers=owner
+        )
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Shared topic"}, headers=owner
+        ).json()
+        peer_id = client.get("/auth/me", headers=peer).json()["id"]
+
+        client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"masteryLevel": 3},
+            headers=peer,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=peer).json()
+        action_id = board["cards"][0]["actions"][0]["id"]
+        client.patch(
+            f"/actions/{action_id}/progress?courseId={course['id']}",
+            json={"isDone": True},
+            headers=peer,
+        )
+
+        client.delete(f"/courses/{course['id']}", headers=owner)
+
+        remaining = fake_dynamo.query(f"USER#{peer_id}")
+        assert not any(topic["id"] in item["SK"] for item in remaining)
+        assert not any(action_id in item["SK"] for item in remaining)
+
 
 class TestGrades:
     def test_weighted_average_favours_heavier_courses(self) -> None:
@@ -86,6 +147,71 @@ class TestGrades:
         grades = client.get("/grades", headers=headers).json()
 
         assert grades["overall"]["average"] is None
+
+
+class TestAiSettings:
+    def test_defaults_before_anything_is_saved(self) -> None:
+        settings = client.get("/ai-settings", headers=auth_headers()).json()
+
+        assert settings == {"aiEnabled": False, "hasApiKey": False, "keyHint": None}
+
+    def test_enabling_without_a_key_is_rejected(self) -> None:
+        response = client.put(
+            "/ai-settings", json={"aiEnabled": True}, headers=auth_headers()
+        )
+
+        assert response.status_code == 422
+
+    def test_enabling_with_a_key_the_provider_rejects_fails(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "features.academic_profile.presentation.router.verify_api_key", lambda key: False
+        )
+
+        response = client.put(
+            "/ai-settings",
+            json={"aiEnabled": True, "apiKey": "sk-ant-not-actually-valid"},
+            headers=auth_headers(),
+        )
+
+        assert response.status_code == 422
+
+    def test_enabling_with_a_valid_key_succeeds_and_never_echoes_it(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
+        )
+        headers = auth_headers()
+
+        response = client.put(
+            "/ai-settings",
+            json={"aiEnabled": True, "apiKey": "sk-ant-abcdef1234"},
+            headers=headers,
+        )
+
+        body = response.json()
+        assert response.status_code == 200
+        assert body["aiEnabled"] is True
+        assert body["hasApiKey"] is True
+        assert body["keyHint"] == "...1234"
+        assert "apiKey" not in body
+
+    def test_toggling_off_keeps_the_saved_key(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
+        )
+        headers = auth_headers()
+        client.put(
+            "/ai-settings",
+            json={"aiEnabled": True, "apiKey": "sk-ant-abcdef1234"},
+            headers=headers,
+        )
+
+        # No apiKey in this request - the frontend never holds the real key.
+        response = client.put("/ai-settings", json={"aiEnabled": False}, headers=headers)
+
+        body = response.json()
+        assert body["aiEnabled"] is False
+        assert body["hasApiKey"] is True
+        assert body["keyHint"] == "...1234"
 
 
 class TestTopicsAndBoard:
