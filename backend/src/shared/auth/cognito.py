@@ -10,6 +10,7 @@ and token_use must be "id".
 from __future__ import annotations
 
 import json
+import logging
 import urllib.request
 from functools import lru_cache
 from typing import Any
@@ -17,6 +18,8 @@ from typing import Any
 from jose import JWTError, jwt
 
 from shared.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def is_configured() -> bool:
@@ -43,13 +46,17 @@ def verify_id_token(token: str) -> dict[str, Any] | None:
     Returns None instead of raising so the caller can answer a plain 401
     without revealing which check failed.
     """
+    # Every rejection is logged with its reason (never the token) - a bare 401
+    # is impossible to debug from the outside.
     if not is_configured():
+        logger.warning("Cognito token rejected: COGNITO_USER_POOL_ID / COGNITO_CLIENT_ID not set")
         return None
 
     try:
         kid = jwt.get_unverified_header(token).get("kid")
         key = next((k for k in _fetch_jwks()["keys"] if k.get("kid") == kid), None)
         if key is None:
+            logger.warning("Cognito token rejected: signing key %s is not in the pool's JWKS", kid)
             return None
 
         claims = jwt.decode(
@@ -58,11 +65,22 @@ def verify_id_token(token: str) -> dict[str, Any] | None:
             algorithms=["RS256"],
             audience=settings.cognito_client_id,
             issuer=issuer(),
+            # The browser only ever sends us the id_token. at_hash binds it to
+            # an access_token we never see, so there is nothing to check against.
+            options={"verify_at_hash": False},
         )
-    except (JWTError, OSError, ValueError, KeyError):
+    except JWTError as exc:
+        logger.warning("Cognito token rejected: %s", exc)
+        return None
+    except (OSError, ValueError, KeyError) as exc:
+        logger.warning("Cognito token rejected: could not verify (%s)", exc)
         return None
 
-    if claims.get("token_use") != "id" or not claims.get("email"):
+    if claims.get("token_use") != "id":
+        logger.warning("Cognito token rejected: token_use is %r, expected 'id'", claims.get("token_use"))
+        return None
+    if not claims.get("email"):
+        logger.warning("Cognito token rejected: no email claim")
         return None
 
     return claims

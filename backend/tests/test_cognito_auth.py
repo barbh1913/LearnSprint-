@@ -118,6 +118,16 @@ class TestCognitoIdToken:
 
         assert client.get("/auth/me", headers=bearer(token)).status_code == 401
 
+    def test_id_token_with_at_hash_is_accepted_without_the_access_token(self) -> None:
+        # Cognito's id_token carries at_hash, which binds it to an access_token
+        # the browser never sends us. python-jose rejects the token outright if
+        # asked to verify that, so the check has to be skipped - this was the
+        # cause of the first real sign-in coming back 401.
+        response = client.get("/auth/me", headers=bearer(mint(at_hash="Zm9vYmFy")))
+
+        assert response.status_code == 200
+        assert response.json()["email"] == "bar@gmail.com"
+
     def test_cognito_user_can_use_the_whole_api(self) -> None:
         headers = bearer(mint())
 
