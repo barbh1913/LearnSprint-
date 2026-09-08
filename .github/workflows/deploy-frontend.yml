@@ -6,15 +6,13 @@ name: Deploy frontend to S3
 # this deploys a site whose pages load but whose requests fail - see the
 # deployment notes in docs/diagrams/deployment.md.
 
-# Manual trigger only until the secrets in docs/deployment-setup.md exist.
-# Running on every push before then would fail every time and put a red X on
-# main for a reason that has nothing to do with the code. Once the secrets are
-# set, restore:
-#
-#   push:
-#     branches: [main]
-#     paths: ['frontend/**', '.github/workflows/deploy-frontend.yml']
+# Runs automatically once the repo secrets in docs/deployment-setup.md are set
+# (learnsprint-github-actions is the scoped IAM role this assumes - ADR 0008).
+# Until then this fails fast with a clear message rather than half-deploying.
 on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/deploy-frontend.yml']
   workflow_dispatch:
 
 permissions:

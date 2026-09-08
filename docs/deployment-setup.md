@@ -1,6 +1,6 @@
 # Deployment
 
-**Status: live.** See [ADR 0008](adr/0008-deployed-to-aws.md) for how it got there, what was reused from the previous project, and four real bugs the deployment surfaced that local testing couldn't have caught.
+**Status: live**, and the frontend now redeploys automatically on push once the GitHub secrets below are set. See [ADR 0008](adr/0008-deployed-to-aws.md) for how it got there, what was reused from the previous project, and four real bugs the deployment surfaced that local testing couldn't have caught.
 
 | | |
 |---|---|
@@ -11,12 +11,36 @@
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
 | CloudFront | `E2GSBED87C32YJ` |
 | API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008 |
+| CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
-## Redeploying after a code change
+## One remaining step: add the GitHub secrets
 
-There is no CI pipeline for this yet (see "Not yet automated" below) — every deploy is these commands, run from `backend/`.
+The AWS side (role, permissions) is done. `deploy-frontend.yml` now triggers on every push to `main` touching `frontend/`, but it **will fail until these secrets exist** — it fails fast with a clear message rather than shipping a broken build, so this is a visible red X, not a silent problem. Add them under **Settings → Secrets and variables → Actions → New repository secret**:
 
-**Backend:**
+| Secret | Value |
+|---|---|
+| `AWS_ROLE_ARN` | `arn:aws:iam::835505308330:role/learnsprint-github-actions` |
+| `S3_BUCKET_NAME` | `learnsprint-frontend-835505308330` |
+| `VITE_API_BASE_URL` | `https://j6ltiaailc.execute-api.il-central-1.amazonaws.com/prod` |
+| `CLOUDFRONT_DISTRIBUTION_ID` | `E2GSBED87C32YJ` |
+| `VITE_COGNITO_DOMAIN` | `il-central-1tahdnpizi.auth.il-central-1.amazoncognito.com` |
+| `VITE_COGNITO_CLIENT_ID` | `4gbs8nrr3jqn54iqjd6r3an6hd` |
+| `VITE_REDIRECT_URI` | `https://d6dbklbpa5amn.cloudfront.net/callback` |
+
+The `VITE_COGNITO_*` and `VITE_REDIRECT_URI` values are public identifiers, not secrets — they end up in the browser bundle regardless. They live in Secrets only so every environment-specific value is set in one place. `frontend/.env.production` already carries the same values for a local production build.
+
+### The CI role
+
+`learnsprint-github-actions` trusts the account's existing GitHub OIDC provider, but only for this repository:
+```
+"token.actions.githubusercontent.com:sub": "repo:barbh1913/LearnSprint-:*"
+```
+It was created fresh rather than reusing the account's other GitHub Actions role (`githubactions-s3-fullaccess`), which is scoped to two unrelated repositories from other coursework — widening someone else's shared role to a third project isn't something to do without asking. Its permissions are equally narrow: `s3:PutObject` / `DeleteObject` / `ListBucket` on `learnsprint-frontend-835505308330` alone, and `cloudfront:CreateInvalidation` on `E2GSBED87C32YJ` alone — nothing else in the account.
+
+## Redeploying by hand
+
+`deploy-frontend.yml` covers the frontend once its secrets are set. The backend has no workflow yet — every backend deploy is still this, run from `backend/`:
+
 ```
 rm -rf build/lambda-package build/lambda-deploy.zip
 pip install --platform manylinux2014_x86_64 --python-version 3.13 --implementation cp --abi cp313 \
@@ -29,7 +53,7 @@ aws lambda update-function-code --function-name learnsprint-api --zip-file fileb
 
 Do **not** delete `*.dist-info` directories to save space — `email-validator`'s metadata lives there and Pydantic needs it at runtime (ADR 0008, bug #1).
 
-**Frontend** (from `frontend/`):
+The same frontend steps `deploy-frontend.yml` runs, done by hand (from `frontend/`), for when a manual deploy is faster than waiting on CI:
 ```
 npm run build   # picks up .env.production automatically
 aws s3 sync dist s3://learnsprint-frontend-835505308330 --delete --cache-control "max-age=31536000,immutable" --exclude "index.html"
@@ -43,37 +67,10 @@ Only `index.html` needs invalidating — every other asset is content-hashed, so
 | Workflow | Trigger | What it does |
 |---|---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | every push and PR | Backend pytest, frontend typecheck + lint + tests. Needs no AWS access — the tests use an in-memory fake for DynamoDB. |
-| [`deploy-frontend.yml`](../.github/workflows/deploy-frontend.yml) | manual only | Builds the SPA and syncs it to S3, then invalidates CloudFront. Not wired to run automatically yet — see below. |
+| [`deploy-frontend.yml`](../.github/workflows/deploy-frontend.yml) | push to `main` touching `frontend/`, or manual | Builds the SPA and syncs it to S3, then invalidates CloudFront. Needs the secrets above to actually succeed. |
 
-## Not yet automated
+## Known gaps
 
-**No CI role for this repository.** The account has a GitHub OIDC provider and a role (`githubactions-s3-fullaccess`) already set up for CI deploys — but its trust policy is scoped to two other repositories (`YVC-CloudDev/bar-weekly-assignment-4`, `YVC-CloudDev/smart-study-planner`), not this one. Widening someone else's shared role to a third repository, or reusing credentials trusted for other projects, wasn't done. A role scoped to `repo:barbh1913/LearnSprint-:*` needs to be created before `deploy-frontend.yml` can run unattended, following the same reasoning as the trust-policy restriction below.
-
-**Backend deploys are entirely manual** — `deploy-frontend.yml` only handles the frontend. A `deploy-backend.yml` doing the packaging steps above doesn't exist yet.
+**No `deploy-backend.yml`.** Backend deploys stay manual (above) until one exists to run the packaging steps in CI.
 
 **No custom domain.** The previous project's domain (`study-planner.proj.rotem.click`) doesn't resolve — its Route 53 zone exists in this account but the parent zone doesn't, so there's no delegation (ADR 0008). The app runs on CloudFront's own domain instead.
-
-## Required secrets, once the CI role exists
-
-Set under **Settings → Secrets and variables → Actions**.
-
-| Secret | Value |
-|---|---|
-| `AWS_ROLE_ARN` | the new repo-scoped role's ARN, once created |
-| `S3_BUCKET_NAME` | `learnsprint-frontend-835505308330` |
-| `VITE_API_BASE_URL` | `https://j6ltiaailc.execute-api.il-central-1.amazonaws.com/prod` |
-| `CLOUDFRONT_DISTRIBUTION_ID` | `E2GSBED87C32YJ` |
-| `VITE_COGNITO_DOMAIN` | `il-central-1tahdnpizi.auth.il-central-1.amazoncognito.com` |
-| `VITE_COGNITO_CLIENT_ID` | `4gbs8nrr3jqn54iqjd6r3an6hd` |
-| `VITE_REDIRECT_URI` | `https://d6dbklbpa5amn.cloudfront.net/callback` |
-
-The `VITE_COGNITO_*` and `VITE_REDIRECT_URI` values are public identifiers, not secrets — they end up in the browser bundle regardless. They live in Secrets only so every environment-specific value is set in one place. `frontend/.env.production` already carries the same values for a local production build, since none of them need hiding.
-
-### Creating the CI role, when ready
-
-1. Create a role trusting the existing OIDC provider, restricted to this repository:
-   ```
-   "token.actions.githubusercontent.com:sub": "repo:barbh1913/LearnSprint-:ref:refs/heads/main"
-   ```
-2. Grant it only what it needs: `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket` on `learnsprint-frontend-835505308330`, plus `cloudfront:CreateInvalidation` on `E2GSBED87C32YJ`.
-3. Restore the automatic trigger in `deploy-frontend.yml` (commented out in the file, with the exact lines to uncomment).
