@@ -8,7 +8,7 @@
 |---|---|
 | DynamoDB table `LearnSprint` | **Live** |
 | 6 Lambda functions, one per feature | **Live** — see the table below |
-| API Gateway `smart-study-planner-api` | **Live** — reused from a previous project; 30 exact routes added for this app, its original three routes untouched |
+| API Gateway `smart-study-planner-api` | **Live** — reused from a previous project; 31 exact routes added for this app, its original three routes untouched |
 | S3 `learnsprint-frontend-835505308330` + CloudFront | **Live** |
 | S3 `learnsprint-uploads-835505308330` | **Live** — one key per uploaded file, under `{userId}/{courseId}/...` |
 | Cognito user pool | **Live** — reused as-is, see [ADR 0007](../adr/0007-google-sign-in-via-cognito.md) |

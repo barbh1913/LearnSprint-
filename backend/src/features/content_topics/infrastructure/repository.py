@@ -85,6 +85,22 @@ def update_topic(course_id: str, topic_id: str, changes: dict[str, Any]) -> dict
     return topic
 
 
+def get_action(course_id: str, topic_id: str, action_id: str) -> dict[str, Any] | None:
+    return dynamo.get_item(dynamo.course_pk(course_id), dynamo.action_sk(topic_id, action_id))
+
+
+def update_action(
+    course_id: str, topic_id: str, action_id: str, changes: dict[str, Any]
+) -> dict[str, Any] | None:
+    action = get_action(course_id, topic_id, action_id)
+    if action is None:
+        return None
+
+    action.update(changes)
+    dynamo.put_item(action)
+    return action
+
+
 def delete_topic(course_id: str, topic_id: str) -> None:
     """Delete the topic and its actions. Progress rows are cleaned up by the caller."""
     for item in dynamo.query_prefix(dynamo.course_pk(course_id), dynamo.topic_sk(topic_id)):

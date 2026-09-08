@@ -169,6 +169,12 @@ export const api = {
   deleteTopic: (courseId: string, topicId: string) =>
     request<void>(`/courses/${courseId}/topics/${topicId}`, { method: 'DELETE' }),
 
+  updateAction: (courseId: string, topicId: string, actionId: string, durationMinutes: number) =>
+    request<{ id: string; topicId: string; type: string; durationMinutes: number }>(
+      `/courses/${courseId}/topics/${topicId}/actions/${actionId}`,
+      { method: 'PATCH', body: JSON.stringify({ durationMinutes }) },
+    ),
+
   /** Upload up to 15 files at once; they're analysed together as one corpus. */
   extractTopics: (courseId: string, files: File[]) => {
     const body = new FormData()

@@ -12,7 +12,7 @@
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
 | S3 (uploads) | `learnsprint-uploads-835505308330` — one key per file, under `{userId}/{courseId}/...` |
 | CloudFront | `E2GSBED87C32YJ` |
-| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 30 exact routes, one per endpoint |
+| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint |
 | CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
 ## One remaining step: add the GitHub secrets
@@ -42,6 +42,12 @@ It was created fresh rather than reusing the account's other GitHub Actions role
 ## Redeploying by hand
 
 `deploy-frontend.yml` covers the frontend once its secrets are set. The backend has no workflow yet — every backend deploy is still this, run from `backend/`. All six functions share one deployment package, so build it once:
+
+**A brand new endpoint also needs a new API Gateway route** — the exact-route strategy (ADR 0009) means `update-function-code` alone isn't enough; a route that doesn't exist yet 404s no matter what the Lambda code does:
+```
+aws apigatewayv2 create-route --api-id j6ltiaailc --route-key "PATCH /courses/{course_id}/topics/{topic_id}/actions/{action_id}" --target integrations/<the feature's integration id>
+```
+Find the right integration id by copying it from another route already pointing at that same Lambda (`aws apigatewayv2 get-routes --api-id j6ltiaailc`). HTTP APIs apply route changes to `$default` immediately — no separate deploy step.
 
 ```
 rm -rf build/lambda-package build/lambda-deploy.zip

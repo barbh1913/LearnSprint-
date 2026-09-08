@@ -27,13 +27,20 @@ def derive_status(
     total_actions: int,
     mastery_level: int | None,
     current_status: str,
+    manual_override: bool = False,
 ) -> str:
     """Work out a topic's status from its actions and mastery rating.
 
-    Manual placement in Backlog or To Do is respected while no action has been
-    completed - that's the student planning ahead (FR4.3). Once real work
-    happens the derived status takes over again.
+    A manual drag (FR4.3) is respected verbatim - to any column, e.g. dragging a
+    Done topic back to Needs Review to redo it - until the next automatic
+    trigger fires: an action completed or a mastery rating given. Those two
+    triggers clear `manual_override` at the point they happen (see the progress
+    router), so by the time either shows up here the derived status below is
+    exactly what should win.
     """
+    if manual_override:
+        return current_status
+
     if total_actions > 0 and actions_done >= total_actions:
         if mastery_level is None:
             # Everything is done but the rating hasn't been given yet, so the

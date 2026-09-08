@@ -86,8 +86,13 @@ def update_topic_progress(
     progress = repository.get_topic_progress(user_id, topic_id)
     if payload.status is not None:
         progress["status"] = payload.status
+        # A drag is a manual override (FR4.3) - it sticks as-is until the next
+        # automatic trigger (an action completed, a mastery rating given)
+        # clears it below or in update_action_progress.
+        progress["statusOverride"] = True
     if payload.masteryLevel is not None:
         progress["masteryLevel"] = payload.masteryLevel
+        progress["statusOverride"] = False
 
     repository.save_topic_progress(progress)
 
@@ -111,6 +116,14 @@ def update_action_progress(
         raise HTTPException(status_code=404, detail="Action not found")
 
     repository.set_action_done(user_id, action_id, action["topicId"], payload.isDone)
+
+    # A finished (or un-finished) action is the other automatic trigger in
+    # FR4.3 - it clears any manual drag so the board goes back to deriving
+    # this topic's status from real progress.
+    topic_progress = repository.get_topic_progress(user_id, action["topicId"])
+    if topic_progress.get("statusOverride"):
+        topic_progress["statusOverride"] = False
+        repository.save_topic_progress(topic_progress)
 
     return {"actionId": action_id, "isDone": payload.isDone, "topicId": action["topicId"]}
 

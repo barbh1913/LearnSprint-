@@ -112,6 +112,7 @@ def _build_card(
             total_actions=len(action_views),
             mastery_level=mastery,
             current_status=stored_status,
+            manual_override=bool(progress.get("statusOverride")) if progress else False,
         ),
         "needsMasteryRating": status_rules.needs_mastery_prompt(
             actions_done=actions_done, total_actions=len(action_views), mastery_level=mastery
