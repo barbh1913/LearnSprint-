@@ -83,6 +83,10 @@ Course *content* is shared: a `Course`, its `Topic`s and their `LearningAction`s
 
 This is a structural guarantee, not a UI filter. There is no `finalGrade` column on `Course` that we remember to hide; the grade lives on the student's own `CourseMembership` record, so there is no query that could return another student's grade by accident. The same holds for mastery ratings and progress, which is what makes the Study Groups privacy requirement (FR5.4) true by construction.
 
+## Two ways in, one account
+
+`USER.passwordHash` is absent for accounts created by Google sign-in — they authenticate through Cognito and have no password. Both login methods resolve to the same `USER` record by email, so nothing else in the model ever sees which one was used ([ADR 0007](adr/0007-google-sign-in-via-cognito.md)).
+
 ## Single-table key design
 
 DynamoDB has one table with a composite key (`PK`, `SK`) plus one global secondary index. Item type is chosen by the key prefix:

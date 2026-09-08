@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import { cognitoConfigured, redirectToGoogleSignIn } from '../auth/cognito'
 import { Button, ErrorNote, Field, Input } from '../components/ui/primitives'
 
 export function LoginPage() {
@@ -42,6 +43,23 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-border bg-card p-6">
+          {cognitoConfigured && (
+            <>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => void redirectToGoogleSignIn()}
+              >
+                Continue with Google
+              </Button>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" aria-hidden />
+                or
+                <span className="h-px flex-1 bg-border" aria-hidden />
+              </div>
+            </>
+          )}
+
           <Field label="Email">
             <Input
               type="email"

@@ -4,13 +4,20 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api, clearToken, getToken, setToken } from '../api/client'
+import { cognitoConfigured, cognitoLogoutUrl } from './cognito'
 import type { User } from '../types'
+
+// Remembers whether the current session came from Google/Cognito, because
+// logging out of one of those has to end the Cognito session as well.
+const AUTH_SOURCE_KEY = 'learnsprint.auth_source'
 
 interface AuthState {
   user: User | null
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string) => Promise<void>
+  /** Adopt a token issued elsewhere - the Cognito id_token after Google sign-in. */
+  loginWithToken: (token: string) => Promise<void>
   logout: () => void
 }
 
@@ -47,13 +54,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await api.me())
   }, [])
 
+  const loginWithToken = useCallback(async (token: string) => {
+    setToken(token)
+    localStorage.setItem(AUTH_SOURCE_KEY, 'cognito')
+    setUser(await api.me())
+  }, [])
+
   const logout = useCallback(() => {
+    const source = localStorage.getItem(AUTH_SOURCE_KEY)
     clearToken()
+    localStorage.removeItem(AUTH_SOURCE_KEY)
     setUser(null)
+
+    // A Google session also lives at Cognito. Without ending it there, the next
+    // "Continue with Google" would silently sign the same person straight back in.
+    if (source === 'cognito' && cognitoConfigured) {
+      window.location.href = cognitoLogoutUrl()
+    }
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, register, loginWithToken, logout }}>
       {children}
     </AuthContext.Provider>
   )

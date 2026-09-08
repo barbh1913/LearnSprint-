@@ -19,6 +19,11 @@ Set under **Settings → Secrets and variables → Actions**.
 | `S3_BUCKET_NAME` | `learnsprint-frontend` | Where the built site is uploaded |
 | `VITE_API_BASE_URL` | `https://abc123.execute-api.il-central-1.amazonaws.com` | Baked into the build so the SPA knows where the API is |
 | `CLOUDFRONT_DISTRIBUTION_ID` | `E1234567890ABC` | Optional. Cache invalidation is skipped if unset. |
+| `VITE_COGNITO_DOMAIN` | `il-central-1tahdnpizi.auth.il-central-1.amazoncognito.com` | Optional. Hosted-UI domain for Google sign-in |
+| `VITE_COGNITO_CLIENT_ID` | `4gbs8nrr3jqn54iqjd6r3an6hd` | Optional. Public app client id |
+| `VITE_REDIRECT_URI` | `https://<cloudfront-domain>/callback` | Optional. Must also be added to the app client's allowed callback URLs |
+
+The three `VITE_COGNITO_*` values are public identifiers, not secrets — they end up in the browser bundle regardless. They live in Secrets only so every environment-specific value is set in one place.
 
 ## The OIDC role
 
@@ -44,5 +49,6 @@ Making the API reachable needs, roughly:
 4. **An execution role** granting DynamoDB access to the `LearnSprint` table.
 5. **CORS**, allowing the CloudFront origin — currently the app allows only `localhost:5173`.
 6. **`JWT_SECRET` as a real secret**, from Secrets Manager or an encrypted environment variable. The local default must not follow the app to production.
+7. **Cognito wired to the production origin**: `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` in the Lambda environment, and the production `/callback` and `/login` URLs added to the app client's allowed callback and logout URLs. The pool itself needs no change ([ADR 0007](adr/0007-google-sign-in-via-cognito.md)).
 
 None of this is hard, but it is several hours of real work, and it is honest to say that the deployment story is designed rather than done. The application architecture is ready for it: [ADR 0002](adr/0002-serverless-lambda-over-containers.md) and [ADR 0004](adr/0004-feature-based-backend-organization.md) already shape the backend so each feature module can become its own Lambda with only the entry point changing.

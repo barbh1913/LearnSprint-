@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AppLayout } from './components/AppLayout'
 import { Spinner } from './components/ui/primitives'
 import { LoginPage } from './pages/LoginPage'
+import { CallbackPage } from './pages/CallbackPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { CoursesPage } from './pages/CoursesPage'
 import { CourseDetailPage } from './pages/CourseDetailPage'
@@ -28,6 +29,7 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/callback" element={<CallbackPage />} />
           <Route
             element={
               <RequireAuth>

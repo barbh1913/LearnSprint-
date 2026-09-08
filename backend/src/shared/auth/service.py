@@ -25,6 +25,12 @@ def register_user(email: str, password: str) -> dict[str, Any]:
 
 def authenticate_user(email: str, password: str) -> dict[str, Any]:
     user = repository.find_by_email(email)
-    if user is None or not verify_password(password, user["passwordHash"]):
+    if user is None:
+        raise InvalidCredentials(email)
+
+    # No stored hash means the account came from Google sign-in. There is no
+    # password to check, so a password login has to fail.
+    password_hash = user.get("passwordHash")
+    if not password_hash or not verify_password(password, password_hash):
         raise InvalidCredentials(email)
     return user

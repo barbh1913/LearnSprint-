@@ -42,7 +42,7 @@ flowchart TB
 
 **No RDS**, so there is no VPC, no subnet groups, and no Lambda connection-pooling problem — the question [ADR 0002](../adr/0002-serverless-lambda-over-containers.md) left open was dissolved rather than answered when persistence moved to DynamoDB ([ADR 0006](../adr/0006-dynamodb-single-table.md)).
 
-**Auth stays as the application's own JWT** for now. A Cognito user pool already exists in the account from an earlier project and could replace it, but that swap only touches `shared/auth` — the rest of the code depends on the `get_current_user` dependency, not on how the token was produced.
+**Auth is the app's own JWT plus Google through the existing Cognito user pool** ([ADR 0007](../adr/0007-google-sign-in-via-cognito.md)). Deploying needs the production callback and logout URLs added to the Cognito app client and the pool/client ids in the Lambda environment — nothing else in `shared/auth` changes, and no feature code depends on how a token was produced.
 
 ## Known gap
 

@@ -57,6 +57,9 @@ Environment variables (all optional, defaults shown):
 | `DYNAMO_TABLE` | `LearnSprint` | Table name |
 | `AWS_REGION` | `il-central-1` | Region the table lives in |
 | `JWT_SECRET` | `dev-secret-change-me` | Signs auth tokens — **set a real value outside local development** |
+| `COGNITO_USER_POOL_ID` | *(empty)* | Enables Google sign-in — see step 4 |
+| `COGNITO_CLIENT_ID` | *(empty)* | Enables Google sign-in — see step 4 |
+| `COGNITO_REGION` | `il-central-1` | Region of the user pool |
 
 Run the tests: `pytest` (from `backend/`). They run against an in-memory stand-in for DynamoDB, so they work offline and leave nothing behind in AWS.
 
@@ -72,7 +75,13 @@ Frontend runs at `http://localhost:5173` and proxies `/api/*` to the backend (se
 
 Run the tests: `npm run test` (from `frontend/`).
 
-## 4. Optional: enable AI analysis
+## 4. Optional: Google sign-in
+
+The login page shows **Continue with Google** when Cognito is configured. Copy `frontend/.env.example` to `frontend/.env.local` and fill in the pool's hosted-UI domain, app client id and callback URL; give the backend the pool id and client id in `backend/.env` (see `backend/.env.example`). Restart both servers — they read these at startup.
+
+The user pool needs Google as an identity provider and `http://localhost:5173/callback` as an allowed callback URL. Without any of this the button is simply hidden and email/password works as before. How the two logins share one account is in [ADR 0007](docs/adr/0007-google-sign-in-via-cognito.md).
+
+## 5. Optional: enable AI analysis
 
 By default, uploaded material is analysed with a built-in keyword heuristic and topics get standard time estimates. Supply your own Anthropic API key under **Profile → AI analysis** and Claude reads the material instead, estimating how long each topic actually takes to learn.
 
