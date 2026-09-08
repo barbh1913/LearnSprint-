@@ -30,6 +30,11 @@ export interface ExtractionResult {
 
 const TOKEN_KEY = 'learnsprint.token'
 
+// In development this stays empty and requests go to /api, which the Vite dev
+// server proxies to localhost:8000. A deployed build has no proxy, so the API
+// lives on another origin and VITE_API_BASE_URL supplies it at build time.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
 }
@@ -56,7 +61,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   const isFormData = options.body instanceof FormData
 
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${API_BASE}/api${path}`, {
     ...options,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
@@ -202,7 +207,7 @@ export const api = {
 
   /** Downloads the plan as .ics so it can be imported into Google Calendar. */
   downloadScheduleIcs: async (courseId: string, courseName: string) => {
-    const response = await fetch(`/api/courses/${courseId}/schedule.ics`, {
+    const response = await fetch(`${API_BASE}/api/courses/${courseId}/schedule.ics`, {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
     if (!response.ok) {
