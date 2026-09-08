@@ -39,6 +39,17 @@ class TopicOut(BaseModel):
     isPriority: bool = False
 
 
+class ActionUpdate(BaseModel):
+    durationMinutes: int = Field(ge=10, le=300)
+
+
+class ActionOut(BaseModel):
+    id: str
+    topicId: str
+    type: str
+    durationMinutes: int
+
+
 class ExtractionResult(BaseModel):
     created: list[TopicOut]
     detectedLanguage: str
@@ -207,6 +218,33 @@ def update_topic(
         raise HTTPException(status_code=404, detail="Topic not found")
 
     return _to_out(topic)
+
+
+@router.patch(
+    "/courses/{course_id}/topics/{topic_id}/actions/{action_id}", response_model=ActionOut
+)
+def update_action(
+    course_id: str,
+    topic_id: str,
+    action_id: str,
+    payload: ActionUpdate,
+    user_id: str = Depends(get_current_user_id),
+) -> ActionOut:
+    """Adjust a learning action's time estimate by hand, e.g. from the board's topic detail view."""
+    _require_membership(user_id, course_id)
+
+    action = repository.update_action(
+        course_id, topic_id, action_id, {"defaultDurationMinutes": payload.durationMinutes}
+    )
+    if action is None:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    return ActionOut(
+        id=action["id"],
+        topicId=action["topicId"],
+        type=action["type"],
+        durationMinutes=action["defaultDurationMinutes"],
+    )
 
 
 @router.delete(

@@ -48,7 +48,7 @@ The system is a physically separated frontend and backend, deployed serverless o
 ### 2. Content analysis & topic management
 - **FR2.1** — Extract a list of topics from uploaded PDF/PPTX course material, supporting Hebrew and English. Up to 15 files can be uploaded at once and are analysed together as one corpus, so a semester of decks yields one de-duplicated topic list.
 - **FR2.7** — Optional AI analysis: the student may enable it in their profile by supplying **their own** Anthropic API key. When on, uploaded material is analysed by Claude to identify topics *and estimate the study time each one needs*; the per-topic estimate replaces the fixed default durations. The key is stored per-user, never returned to the frontend, and never logged. If AI is off or the call fails for any reason, the keyword heuristic runs instead — an AI outage must never block an upload.
-- **FR2.2** — Full editing of the extracted topic list: add, delete, rename.
+- **FR2.2** — Full editing of the extracted topic list: add, delete, rename, and adjust a learning action's time estimate by hand when the extracted default doesn't match reality.
 - **FR2.3** — Each topic automatically gets 3 learning actions: read, summarize, quiz.
 - **FR2.4** — Let the user rate their "mastery level" per topic, on a 1–5 scale.
 - **FR2.5** — Per-topic status: `Backlog` / `To Do` / `In Progress` / `Needs Review` / `Done` (see FR4.2 for how a topic moves between these).
@@ -106,7 +106,7 @@ Full data model and DynamoDB key design: [docs/erd.md](docs/erd.md). Some data i
 | **CourseMembership** | `userId`, `courseId`, `role: 'owner' \| 'member'`, `finalGrade?` | Private (one row per user per course; also what makes them a course/group member) |
 | **Topic** | `id`, `courseId`, `name`, `isPriority: boolean`, `actions: Action[]` | Shared |
 | **Action** | `id`, `topicId`, `type: 'read' \| 'summarize' \| 'quiz'`, `defaultDurationMinutes` | Shared (default estimate, not the actual scheduled time) |
-| **UserTopicProgress** | `userId`, `topicId`, `status: 'backlog' \| 'todo' \| 'in_progress' \| 'needs_review' \| 'done'`, `masteryLevel?: 1..5` | Private (per-user view of a shared Topic) |
+| **UserTopicProgress** | `userId`, `topicId`, `status: 'backlog' \| 'todo' \| 'in_progress' \| 'needs_review' \| 'done'`, `statusOverride: boolean`, `masteryLevel?: 1..5` | Private (per-user view of a shared Topic) |
 | **UserActionProgress** | `userId`, `actionId`, `isDone: boolean`, `completedAt?: DateTime` | Private |
 | **UserConstraints** | `userId`, `blockedSlots: {day, startTime, endTime}[]`, `timePreference: 'morning' \| 'evening'` | Private |
 | **AiSettings** | `userId`, `aiEnabled: boolean`, `apiKey` | Private — **never returned by any API response and never logged** (FR2.7) |
@@ -117,6 +117,7 @@ Define these as explicit types in the backend Domain layer (Python dataclasses o
 Notes on the model:
 - There is no standalone `StudyGroup` entity. A group is just the set of `CourseMembership` rows for a course — one course, one implicit group. Ownership is `CourseMembership.role === 'owner'`, not a separate field on `Course`.
 - `masteryLevel` and topic `status` live on `UserTopicProgress`, not on `Topic` — the FR3.2 algorithm reads mastery per `(user, topic)`, never a shared value.
+- `statusOverride` records that `status` was last set by a manual drag (FR4.3) rather than derived. The board re-derives status from actions/mastery on every read (see `progress/domain/status.py`), except while this flag is set — it clears automatically the moment either FR4.3 trigger fires (an action's done-state changes, or a mastery rating is given), which is what makes a manual drag "stick" without needing its own stored history.
 - `finalGrade` lives on `CourseMembership`, never on `Course` — this is what makes FR5.4 (grade privacy) structurally true rather than a UI-level filter.
 - **The generated schedule (FR3.1–FR3.3 output) is not a stored entity.** It's computed on demand in the Domain layer from `UserConstraints` + `UserTopicProgress.masteryLevel` + the shared topic/action list, which is viable specifically because NFR2 already requires that computation to finish in under 2 seconds. This also avoids having to invalidate a stored schedule whenever a shared topic changes under a group member. If schedule history ever becomes a requirement, that's a new, explicitly-versioned entity — not something to retrofit into this table.
 - **The sprint is not a stored entity either.** The week comes from the current date, capacity from `UserConstraints`, and the commitment from whichever topics currently sit in `todo` / `in_progress`. Moving a card *is* changing the sprint, so there is no separate sprint record that could drift out of sync with the board.

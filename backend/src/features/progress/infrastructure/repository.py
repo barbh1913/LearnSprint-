@@ -36,6 +36,7 @@ def get_topic_progress(user_id: str, topic_id: str) -> dict[str, Any]:
         "userId": user_id,
         "topicId": topic_id,
         "status": "backlog",
+        "statusOverride": False,
         "masteryLevel": None,
     }
 

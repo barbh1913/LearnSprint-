@@ -304,6 +304,88 @@ class TestTopicsAndBoard:
 
         assert board["cards"][0]["status"] == "todo"
 
+    def test_dragging_a_card_to_in_progress_sticks_with_no_actions_done(self) -> None:
+        """Regression: dragging straight to In progress used to snap back to Backlog
+        on the next board read, because only Backlog/To do were treated as a
+        valid manual placement (see progress/domain/status.py)."""
+        headers = auth_headers()
+        course = create_course(headers)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=headers
+        ).json()
+
+        client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"status": "in_progress"},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "in_progress"
+
+    def test_dragging_a_done_topic_back_to_needs_review_sticks_until_the_next_trigger(
+        self,
+    ) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        card = _add_topic_and_finish_actions(headers, course["id"], "Sorting")
+        client.patch(
+            f"/topics/{card['topicId']}/progress?courseId={course['id']}",
+            json={"masteryLevel": 5},
+            headers=headers,
+        )
+
+        client.patch(
+            f"/topics/{card['topicId']}/progress?courseId={course['id']}",
+            json={"status": "needs_review"},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "needs_review"
+
+    def test_completing_an_action_clears_a_manual_override(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=headers
+        ).json()
+        client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"status": "backlog"},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+        action_id = board["cards"][0]["actions"][0]["id"]
+
+        client.patch(
+            f"/actions/{action_id}/progress?courseId={course['id']}",
+            json={"isDone": True},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "in_progress"
+
+    def test_rating_mastery_clears_a_manual_override(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        card = _add_topic_and_finish_actions(headers, course["id"], "Sorting")
+        client.patch(
+            f"/topics/{card['topicId']}/progress?courseId={course['id']}",
+            json={"status": "backlog"},
+            headers=headers,
+        )
+
+        client.patch(
+            f"/topics/{card['topicId']}/progress?courseId={course['id']}",
+            json={"masteryLevel": 5},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert board["cards"][0]["status"] == "done"
+
     def test_unknown_status_is_rejected(self) -> None:
         headers = auth_headers()
         course = create_course(headers)
@@ -346,6 +428,42 @@ class TestTopicsAndBoard:
 
         assert updated["name"] == "New name"
         assert updated["isPriority"] is True
+
+    def test_editing_an_action_s_time_estimate(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=headers)
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+        topic_id = board["cards"][0]["topicId"]
+        action = board["cards"][0]["actions"][0]
+
+        updated = client.patch(
+            f"/courses/{course['id']}/topics/{topic_id}/actions/{action['id']}",
+            json={"durationMinutes": 90},
+            headers=headers,
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert updated.status_code == 200
+        assert updated.json()["durationMinutes"] == 90
+        saved_action = next(a for a in board["cards"][0]["actions"] if a["id"] == action["id"])
+        assert saved_action["durationMinutes"] == 90
+
+    def test_an_action_s_time_estimate_must_be_realistic(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=headers)
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+        topic_id = board["cards"][0]["topicId"]
+        action_id = board["cards"][0]["actions"][0]["id"]
+
+        response = client.patch(
+            f"/courses/{course['id']}/topics/{topic_id}/actions/{action_id}",
+            json={"durationMinutes": 0},
+            headers=headers,
+        )
+
+        assert response.status_code == 422
 
 
 class TestSchedule:

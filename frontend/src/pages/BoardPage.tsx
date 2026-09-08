@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import type { Board, BoardCard, Course, Sprint, TopicStatus } from '../types'
 import { ACTION_LABELS, STATUS_LABELS, STATUS_ORDER } from '../types'
 import { SprintHeader } from '../components/SprintHeader'
+import { TopicDetailDialog } from '../components/TopicDetailDialog'
 import {
   Badge,
   EmptyState,
@@ -31,6 +32,7 @@ export function BoardPage() {
   const [courseFilter, setCourseFilter] = useState('')
   const [draggedCard, setDraggedCard] = useState<BoardCard | null>(null)
   const [dragOverColumn, setDragOverColumn] = useState<TopicStatus | null>(null)
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(true)
 
@@ -131,6 +133,7 @@ export function BoardPage() {
             return (
               <div
                 key={status}
+                data-testid={`column-${status}`}
                 onDragOver={(event) => {
                   event.preventDefault()
                   setDragOverColumn(status)
@@ -158,6 +161,7 @@ export function BoardPage() {
                       card={card}
                       onDragStart={() => setDraggedCard(card)}
                       onDragEnd={() => setDraggedCard(null)}
+                      onOpen={() => setSelectedTopicId(card.topicId)}
                       isDragging={draggedCard?.topicId === card.topicId}
                     />
                   ))}
@@ -173,6 +177,12 @@ export function BoardPage() {
           })}
         </div>
       )}
+
+      <TopicDetailDialog
+        card={board?.cards.find((card) => card.topicId === selectedTopicId) ?? null}
+        onClose={() => setSelectedTopicId(null)}
+        onChanged={load}
+      />
     </>
   )
 }
@@ -181,11 +191,13 @@ function TopicCard({
   card,
   onDragStart,
   onDragEnd,
+  onOpen,
   isDragging,
 }: {
   card: BoardCard
   onDragStart: () => void
   onDragEnd: () => void
+  onOpen: () => void
   isDragging: boolean
 }) {
   return (
@@ -199,12 +211,12 @@ function TopicCard({
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <Link
-          to={`/courses/${card.courseId}`}
-          className="text-sm font-medium leading-snug hover:text-primary hover:underline"
+        <button
+          onClick={onOpen}
+          className="text-left text-sm font-medium leading-snug hover:text-primary hover:underline"
         >
           {card.name}
-        </Link>
+        </button>
         {card.isPriority && (
           <Star className="size-3.5 shrink-0 text-amber-500" fill="currentColor" aria-label="Core topic" />
         )}
