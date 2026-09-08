@@ -230,11 +230,15 @@ class TestPrivacy:
             headers=owner,
         )
 
-        body = client.get(f"/courses/{course['id']}/members", headers=peer).text
+        response = client.get(f"/courses/{course['id']}/members", headers=peer)
+        members = response.json()
 
         for field in peer_view.PRIVATE_FIELDS:
-            assert field not in body, f"{field} leaked into the member list"
-        assert "95" not in body
+            assert field not in response.text, f"{field} leaked into the member list"
+        # Checked as an actual field value, not a substring of the response body -
+        # a random UUID or timestamp elsewhere in the payload can legitimately
+        # contain the digits "95" and would make a raw substring check flaky.
+        assert all(95 not in member.values() for member in members)
 
     def test_a_member_never_sees_another_members_grade(self) -> None:
         owner = register("owner@example.com")

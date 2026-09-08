@@ -21,11 +21,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# The Vite dev server proxies /api, but allowing its origin directly keeps
-# things working if the frontend is ever served from somewhere else.
+# The Vite dev server proxies /api, so the dev origins are only needed when
+# something bypasses the proxy. The CloudFront origin is the deployed frontend.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://d6dbklbpa5amn.cloudfront.net",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

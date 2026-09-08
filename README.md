@@ -4,6 +4,8 @@ Plan your studying as a weekly sprint: commit to a set of material, and know upf
 
 Upload your course material and LearnSprint works out the topics and how long each takes to learn. Pull topics into this week's sprint and it tells you immediately whether that commitment fits your real free hours — after work and lectures, not in theory. As the exam approaches it builds a study plan that gives the topics you rated weakest the most review time.
 
+**Live**: **[d6dbklbpa5amn.cloudfront.net](https://d6dbklbpa5amn.cloudfront.net)** — sign up with any email, or continue with Google. See [ADR 0008](docs/adr/0008-deployed-to-aws.md) for how it's deployed.
+
 ## Documentation
 
 | Document | What's in it |

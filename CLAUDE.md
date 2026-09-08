@@ -33,7 +33,7 @@ The system is a physically separated frontend and backend, deployed serverless o
   - **Presentation** — FastAPI routers locally, Lambda handlers in production; both thin, no business logic.
 - **Persistence**: a single DynamoDB table, `LearnSprint` (composite `PK`/`SK` + one GSI). There is no local database — development runs against the real table; see [ADR 0006](docs/adr/0006-dynamodb-single-table.md) and [docs/erd.md](docs/erd.md) for the key design. Tests run against an in-memory fake and stay fully offline.
 - **Auth**: the app's own email/password JWT, plus Google sign-in through the existing Cognito user pool (PKCE, `id_token`). Both resolve through one `get_current_user` dependency and map to one account per email — see [ADR 0007](docs/adr/0007-google-sign-in-via-cognito.md). Feature code never knows which was used.
-- **Target deployment (added incrementally, after the core FRs work locally)**: React build on S3 + CloudFront; API Gateway routing to Lambda functions grouped by business feature; the same DynamoDB table; S3 for uploaded material.
+- **Deployment**: live — React build on S3 + CloudFront; the FastAPI app behind `mangum` on one Lambda, routed through the account's existing API Gateway; the same DynamoDB table. See [ADR 0008](docs/adr/0008-deployed-to-aws.md) and [docs/deployment-setup.md](docs/deployment-setup.md) for URLs, redeploy steps, and what's still manual (there's no CI/CD yet).
 - **Testing**: `pytest` for the backend (heaviest on the Domain layer, especially the FR3.2 algorithm), Vitest + React Testing Library for the frontend.
 - Clean, readable code: meaningful names, small focused functions, no comments that explain "what" (the code itself should be clear) — comments only when there's a non-obvious reason.
 
