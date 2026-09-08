@@ -79,6 +79,24 @@ def list_course_members(course_id: str) -> list[dict[str, Any]]:
     return dynamo.query_gsi1(dynamo.course_pk(course_id))
 
 
+def add_member(user_id: str, course: dict[str, Any], role: str = "member") -> None:
+    """Enrol another user on an existing course (FR5.1).
+
+    They get their own membership row, so their grade and progress stay theirs -
+    joining a group never exposes either.
+    """
+    _put_membership(user_id, course, role=role, final_grade=None)
+
+
+def remove_membership(user_id: str, course_id: str) -> None:
+    """Drop a member's enrolment.
+
+    Their progress rows are left alone: they belong to that user, not to the
+    course, and deleting them would destroy their own study history.
+    """
+    dynamo.delete_item(dynamo.user_pk(user_id), dynamo.course_pk(course_id))
+
+
 def set_final_grade(user_id: str, course_id: str, grade: float | None) -> dict[str, Any] | None:
     membership = get_membership(user_id, course_id)
     if membership is None:

@@ -16,6 +16,7 @@ import {
   Spinner,
 } from '../components/ui/primitives'
 import { MasteryPicker } from '../components/MasteryPicker'
+import { CourseMembers } from '../components/CourseMembers'
 
 /** Single-course view (FR1.4): topics, their actions, and mastery in one place. */
 export function CourseDetailPage() {
@@ -224,6 +225,10 @@ export function CourseDetailPage() {
           ))}
         </div>
       )}
+
+      <div className="mt-6">
+        <CourseMembers courseId={courseId} />
+      </div>
     </>
   )
 }

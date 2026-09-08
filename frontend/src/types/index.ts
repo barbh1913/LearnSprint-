@@ -146,6 +146,21 @@ export interface Velocity {
   masteryDistribution: number[]
 }
 
+/** A member of a shared course (FR5.3).
+ *
+ * Deliberately carries no grade, constraints or schedule - the backend never
+ * sends them, and this type is the record of that.
+ */
+export interface CourseMember {
+  userId: string
+  email: string
+  role: 'owner' | 'member'
+  isMe: boolean
+  topicsTotal: number
+  topicsDone: number
+  percentComplete: number
+}
+
 export const STATUS_ORDER: TopicStatus[] = [
   'backlog',
   'todo',

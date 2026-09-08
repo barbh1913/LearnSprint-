@@ -5,6 +5,7 @@ import type {
   AiSettings,
   Board,
   Course,
+  CourseMember,
   ExamType,
   Grades,
   MasteryLevel,
@@ -217,4 +218,15 @@ export const api = {
   },
 
   getVelocity: () => request<Velocity>('/velocity'),
+
+  getMembers: (courseId: string) => request<CourseMember[]>(`/courses/${courseId}/members`),
+
+  inviteMember: (courseId: string, email: string) =>
+    request<CourseMember>(`/courses/${courseId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  removeMember: (courseId: string, memberId: string) =>
+    request<void>(`/courses/${courseId}/members/${memberId}`, { method: 'DELETE' }),
 }

@@ -12,6 +12,7 @@ from features.academic_profile.presentation.router import router as academic_pro
 from features.content_topics.presentation.router import router as content_topics_router
 from features.progress.presentation.router import router as progress_router
 from features.scheduling.presentation.router import router as scheduling_router
+from features.study_groups.presentation.router import router as study_groups_router
 from shared.auth.router import router as auth_router
 
 app = FastAPI(
@@ -35,6 +36,7 @@ app.include_router(academic_profile_router)
 app.include_router(content_topics_router)
 app.include_router(scheduling_router)
 app.include_router(progress_router)
+app.include_router(study_groups_router)
 
 
 @app.get("/health", tags=["health"])
