@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { exchangeCodeForTokens } from '../auth/cognito'
@@ -13,8 +13,17 @@ export function CallbackPage() {
   const navigate = useNavigate()
   const { loginWithToken } = useAuth()
   const [error, setError] = useState('')
+  const started = useRef(false)
 
   useEffect(() => {
+    // The code in the URL is single-use, so this must run exactly once. Two
+    // things would otherwise run it again: StrictMode's simulated remount in
+    // development, and react-router handing out a new `navigate` whenever the
+    // path changes. A second exchange always fails with 400, and that error
+    // would overwrite the first one's success. The ref survives both.
+    if (started.current) return
+    started.current = true
+
     const params = new URLSearchParams(window.location.search)
     const denied = params.get('error')
     const code = params.get('code')
