@@ -76,7 +76,7 @@ Manual drags are an override, not the primary mechanism — the system still der
 - **FR5.3** — Show an aggregate progress indicator (progress bar) for each group member, for peer monitoring, without exposing that member's personal schedule.
 - **FR5.4** — Privacy: personal grades and time constraints are **never** exposed to group members — only general progress status.
 
-> Scope decision: this is an extension on top of the single-user core (FR1–FR3). Implement the core first until it's stable, then build the sharing layer — don't build sync on top of an immature data model.
+> Built, in `backend/src/features/study_groups/`. This was deliberately sequenced after the single-user core so the sharing layer landed on a stable data model rather than shaping it — and it paid off: the shared/private split (see the Data Dictionary) meant FR5.4 privacy held by construction, with no retrofit. The one rule that decides what one member may see of another lives in `study_groups/domain/peer_view.py`.
 
 ### 6. Visual timeline (Gantt)
 - **FR6.1** — A weekly Gantt-style view renders the schedule already produced by FR3.1–FR3.3 as time blocks across the days of the week, grouped by topic. This is a visualization of existing schedule output — no new scheduling logic.
@@ -92,7 +92,7 @@ Manual drags are an override, not the primary mechanism — the system still der
 
 Full use cases with alternative flows and postconditions: **[docs/use-cases.md](docs/use-cases.md)**.
 
-UC1 register/sign in · UC2 define time constraints · UC3 set up a course · UC4 upload material and extract topics · UC5 enable AI analysis · UC6 **plan the weekly sprint** (the core loop) · UC7 generate a study plan · UC8 study and record progress · UC9 track grades and progress · UC10–UC12 Study Groups (specified, not built).
+UC1 register/sign in · UC2 define time constraints · UC3 set up a course · UC4 upload material and extract topics · UC5 enable AI analysis · UC6 **plan the weekly sprint** (the core loop) · UC7 generate a study plan · UC8 study and record progress · UC9 track grades and progress · UC10–UC12 Study Groups.
 
 ## Data Dictionary
 

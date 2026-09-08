@@ -2,7 +2,7 @@
 
 All use cases share one actor unless stated otherwise: **Student** — an authenticated user. The **System** is the second actor throughout.
 
-UC1–UC9 cover the single-user core (built). UC10–UC12 cover Study Groups (specified, not yet built — see the scope note in [CLAUDE.md](../CLAUDE.md)).
+UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were built after the core on purpose so they landed on a stable data model — see the scope note in [CLAUDE.md](../CLAUDE.md).
 
 ---
 
@@ -153,16 +153,14 @@ UC1–UC9 cover the single-user core (built). UC10–UC12 cover Study Groups (sp
 
 ---
 
-## UC10 — Create a study group *(specified, not built)*
-
+## UC10 — Create a study group
 **Actors:** Student (owner), other Students, System
 **Requirement:** FR5.1
 **Main flow:** the owner invites classmates to a course by email; the System notifies them and they join as members.
 
 ---
 
-## UC11 — Edit a shared backlog *(specified, not built)*
-
+## UC11 — Edit a shared backlog
 **Actors:** group members, System
 **Requirement:** FR5.2
 **Main flow:** any member edits topics, actions, or time estimates, and the change is reflected for everyone — one shared backlog, not a copy each.
@@ -170,8 +168,7 @@ UC1–UC9 cover the single-user core (built). UC10–UC12 cover Study Groups (sp
 
 ---
 
-## UC12 — Monitor group progress *(specified, not built)*
-
+## UC12 — Monitor group progress
 **Actors:** group members, System
 **Requirement:** FR5.3, FR5.4
 **Main flow:** each member sees a coarse completion percentage for every other member — enough for peer motivation.

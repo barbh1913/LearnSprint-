@@ -88,6 +88,7 @@ backend/
       content_topics/       Material upload, topic extraction, AI     (FR2)
       scheduling/           Mastery-weighted allocation algorithm     (FR3)
       progress/             Sprint planning, board, velocity     (FR4, FR7)
+      study_groups/         Shared courses, peer progress         (FR5)
     shared/               Auth, DynamoDB access, config
   tests/
 frontend/
