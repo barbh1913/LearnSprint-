@@ -102,16 +102,3 @@ def analyse_syllabus(lines: list[str], *, api_key: str) -> list[AnalysedTopic]:
         raise AiAnalysisUnavailable("The model returned no topics")
 
     return analysis.topics
-
-
-def verify_api_key(api_key: str) -> bool:
-    """Cheap round-trip so the profile page can tell the student the key works."""
-    try:
-        Anthropic(api_key=api_key).messages.create(
-            model=MODEL,
-            max_tokens=1,
-            messages=[{"role": "user", "content": "ping"}],
-        )
-    except APIError:
-        return False
-    return True
