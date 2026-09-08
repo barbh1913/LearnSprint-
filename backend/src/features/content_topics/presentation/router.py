@@ -13,6 +13,7 @@ from features.content_topics.infrastructure import ai_extractor
 from features.content_topics.infrastructure import file_parser
 from features.content_topics.infrastructure import repository
 from features.progress.infrastructure import repository as progress_repo
+from shared import storage
 from shared.auth.dependencies import get_current_user_id
 
 router = APIRouter(tags=["content-topics"])
@@ -76,7 +77,7 @@ async def extract_from_files(
             detail=f"Upload at most {MAX_FILES_PER_UPLOAD} files at a time",
         )
 
-    lines, filenames = await _read_all(files)
+    lines, filenames = await _read_all(files, user_id=user_id, course_id=course_id)
     if not lines:
         raise HTTPException(status_code=422, detail="Those files had no readable text")
 
@@ -106,8 +107,15 @@ async def extract_from_files(
     )
 
 
-async def _read_all(files: list[UploadFile]) -> tuple[list[str], list[str]]:
-    """Pull the text out of every uploaded file, concatenated in upload order."""
+async def _read_all(
+    files: list[UploadFile], *, user_id: str, course_id: str
+) -> tuple[list[str], list[str]]:
+    """Save every uploaded file under the student's own S3 prefix, then read
+    the text back out of the stored copy - not the request body - so what
+    gets analysed is provably what's on record for this student (FR2.1).
+
+    Concatenated in upload order.
+    """
     lines: list[str] = []
     filenames: list[str] = []
 
@@ -118,8 +126,13 @@ async def _read_all(files: list[UploadFile]) -> tuple[list[str], list[str]]:
                 status_code=413, detail=f"{upload.filename} is larger than 20 MB"
             )
 
+        filename = upload.filename or ""
+        key = storage.upload_key(user_id, course_id, filename)
+        storage.put_object(key, content)
+        stored = storage.get_object(key)
+
         try:
-            lines.extend(file_parser.read_lines(upload.filename or "", content))
+            lines.extend(file_parser.read_lines(filename, stored))
         except file_parser.UnsupportedFileType as exc:
             raise HTTPException(
                 status_code=400, detail="Only PDF and PPTX files are supported"
@@ -129,7 +142,7 @@ async def _read_all(files: list[UploadFile]) -> tuple[list[str], list[str]]:
                 status_code=400, detail=f"Could not read {upload.filename}"
             ) from exc
 
-        filenames.append(upload.filename or "")
+        filenames.append(filename)
 
     return lines, filenames
 

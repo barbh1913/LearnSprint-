@@ -1,8 +1,8 @@
 """Shared test fixtures.
 
-Tests run against an in-memory stand-in for DynamoDB rather than the real table,
-so they're fast, offline, and don't leave junk in AWS. The fake implements only
-the four access patterns shared/dynamo.py actually uses.
+Tests run against in-memory stand-ins for DynamoDB and S3 rather than the real
+services, so they're fast, offline, and don't leave junk in AWS. Each fake
+implements only the access patterns its shared/ module actually uses.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from shared import dynamo
+from shared import dynamo, storage
 
 
 class FakeTable:
@@ -56,3 +56,31 @@ def fake_dynamo(monkeypatch: pytest.MonkeyPatch) -> FakeTable:
     monkeypatch.setattr(dynamo, "query_gsi1", table.query_index)
 
     return table
+
+
+class FakeBucket:
+    """Dict-backed replacement for the uploads bucket, keyed by object key."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def put(self, key: str, content: bytes) -> None:
+        self.objects[key] = content
+
+    def get(self, key: str) -> bytes:
+        return self.objects[key]
+
+    def delete(self, key: str) -> None:
+        self.objects.pop(key, None)
+
+
+@pytest.fixture(autouse=True)
+def fake_storage(monkeypatch: pytest.MonkeyPatch) -> FakeBucket:
+    """Point shared.storage at the fake bucket for the duration of each test."""
+    bucket = FakeBucket()
+
+    monkeypatch.setattr(storage, "put_object", bucket.put)
+    monkeypatch.setattr(storage, "get_object", bucket.get)
+    monkeypatch.setattr(storage, "delete_object", bucket.delete)
+
+    return bucket

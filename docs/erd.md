@@ -126,6 +126,10 @@ Every query the application makes, and how the keys serve it:
 
 `CourseMembership` carries a copy of the course's `name`, `year`, `semester`, `credits`, `examDate` and `examType`. This is deliberate: the courses list and the grades page need those fields for every course, and without the copy each page would need one additional lookup per course. `update_course` refreshes the copies on every membership, which is the cost of the trade.
 
+## Uploaded material lives in S3, not DynamoDB
+
+Course files a student uploads are stored in a separate bucket (`learnsprint-uploads-835505308330`, deployed - see [ADR 0009](adr/0009-split-into-per-feature-lambdas.md)), one object per file, keyed `{userId}/{courseId}/{uuid}-{filename}`. There is no DynamoDB record of the upload — no key beyond the S3 key itself, since nothing yet needs to list or re-analyse past uploads. The prefix is the same private-per-user pattern as everything else here: a student's files sit under their own `userId`, structurally apart from anyone else's, the same way their `UserTopicProgress` rows do.
+
 ## What is *not* stored
 
 **The generated schedule.** FR3.1–FR3.3 produce time blocks, and those are computed on demand and returned — never written back. See [ADR 0005](adr/0005-schedule-not-persisted.md).

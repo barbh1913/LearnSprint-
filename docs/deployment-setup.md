@@ -1,16 +1,18 @@
 # Deployment
 
-**Status: live**, and the frontend now redeploys automatically on push once the GitHub secrets below are set. See [ADR 0008](adr/0008-deployed-to-aws.md) for how it got there, what was reused from the previous project, and four real bugs the deployment surfaced that local testing couldn't have caught.
+**Status: live**, and the frontend now redeploys automatically on push once the GitHub secrets below are set. See [ADR 0008](adr/0008-deployed-to-aws.md) for the initial deployment and [ADR 0009](adr/0009-split-into-per-feature-lambdas.md) for splitting it into six per-feature Lambdas with per-student S3 storage for uploads.
 
 | | |
 |---|---|
 | Frontend | `https://d6dbklbpa5amn.cloudfront.net` |
 | API | `https://j6ltiaailc.execute-api.il-central-1.amazonaws.com/prod` |
-| Lambda | `learnsprint-api` (il-central-1) |
+| Lambdas | `learnsprint-auth`, `-academic-profile`, `-content-topics`, `-scheduling`, `-progress`, `-study-groups` (il-central-1) — one per feature, see ADR 0009 |
+| Lambda execution role | `learnsprint-lambda-role` — scoped to the `LearnSprint` table and the uploads bucket only |
 | DynamoDB | `LearnSprint` table |
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
+| S3 (uploads) | `learnsprint-uploads-835505308330` — one key per file, under `{userId}/{courseId}/...` |
 | CloudFront | `E2GSBED87C32YJ` |
-| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008 |
+| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 30 exact routes, one per endpoint |
 | CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
 ## One remaining step: add the GitHub secrets
@@ -39,7 +41,7 @@ It was created fresh rather than reusing the account's other GitHub Actions role
 
 ## Redeploying by hand
 
-`deploy-frontend.yml` covers the frontend once its secrets are set. The backend has no workflow yet — every backend deploy is still this, run from `backend/`:
+`deploy-frontend.yml` covers the frontend once its secrets are set. The backend has no workflow yet — every backend deploy is still this, run from `backend/`. All six functions share one deployment package, so build it once:
 
 ```
 rm -rf build/lambda-package build/lambda-deploy.zip
@@ -48,8 +50,15 @@ pip install --platform manylinux2014_x86_64 --python-version 3.13 --implementati
 cp src/main.py src/lambda_handler.py build/lambda-package/
 cd build/lambda-package && find . -name "__pycache__" -type d -exec rm -rf {} +
 # zip build/lambda-package's contents (not the folder itself) into ../lambda-deploy.zip
-aws lambda update-function-code --function-name learnsprint-api --zip-file fileb://build/lambda-deploy.zip
 ```
+
+Then update whichever function(s) actually changed — no need to redeploy all six for, say, a `scheduling`-only fix:
+
+```
+aws lambda update-function-code --function-name learnsprint-scheduling --zip-file fileb://build/lambda-deploy.zip
+```
+
+Function names: `learnsprint-auth`, `learnsprint-academic-profile`, `learnsprint-content-topics`, `learnsprint-scheduling`, `learnsprint-progress`, `learnsprint-study-groups`. A change to anything under `shared/` needs all six, since they all import it from the same package.
 
 Do **not** delete `*.dist-info` directories to save space — `email-validator`'s metadata lives there and Pydantic needs it at runtime (ADR 0008, bug #1).
 
@@ -71,6 +80,6 @@ Only `index.html` needs invalidating — every other asset is content-hashed, so
 
 ## Known gaps
 
-**No `deploy-backend.yml`.** Backend deploys stay manual (above) until one exists to run the packaging steps in CI.
+**No `deploy-backend.yml`.** Backend deploys stay manual (above) until one exists to run the packaging + per-function `update-function-code` steps in CI.
 
 **No custom domain.** The previous project's domain (`study-planner.proj.rotem.click`) doesn't resolve — its Route 53 zone exists in this account but the parent zone doesn't, so there's no delegation (ADR 0008). The app runs on CloudFront's own domain instead.

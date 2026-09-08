@@ -313,6 +313,23 @@ class TestConstraints:
         assert stored["blockedSlots"] == []
 
 
+def _make_pptx(*slide_titles: str) -> bytes:
+    """A real, parseable .pptx in memory - not a stub, an actual deck."""
+    from io import BytesIO
+
+    from pptx import Presentation
+
+    presentation = Presentation()
+    layout = presentation.slide_layouts[0]
+    for title in slide_titles:
+        slide = presentation.slides.add_slide(layout)
+        slide.shapes.title.text = title
+
+    buffer = BytesIO()
+    presentation.save(buffer)
+    return buffer.getvalue()
+
+
 class TestUpload:
     @pytest.mark.parametrize("filename", ["notes.txt", "notes.docx"])
     def test_unsupported_file_types_are_rejected(self, filename: str) -> None:
@@ -326,6 +343,73 @@ class TestUpload:
         )
 
         assert response.status_code == 400
+
+    def test_extracting_a_real_pptx_creates_topics_with_actions(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        content = _make_pptx("Binary Search Trees", "Hash Tables")
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("lecture1.pptx", content, "application/vnd.openxmlformats"))],
+            headers=headers,
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["analysedBy"] == "heuristic"  # no AI key set for this student
+        assert {topic["name"] for topic in body["created"]} == {
+            "Binary Search Trees",
+            "Hash Tables",
+        }
+
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+        actions_per_topic = {len(card["actions"]) for card in board["cards"]}
+        assert actions_per_topic == {3}  # read, summarize, quiz - every topic, no exceptions
+
+    def test_uploaded_file_lands_under_the_uploader_s_own_prefix(
+        self, fake_storage
+    ) -> None:
+        headers = auth_headers("uploader@example.com")
+        course = create_course(headers)
+        user_id = client.get("/auth/me", headers=headers).json()["id"]
+
+        client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("lecture1.pptx", _make_pptx("Recursion"), "application/x"))],
+            headers=headers,
+        )
+
+        stored_keys = list(fake_storage.objects)
+        assert len(stored_keys) == 1
+        assert stored_keys[0].startswith(f"{user_id}/{course['id']}/")
+        assert stored_keys[0].endswith("-lecture1.pptx")
+
+    def test_a_different_students_upload_lands_under_their_own_prefix(
+        self, fake_storage
+    ) -> None:
+        alice = auth_headers("alice@example.com")
+        bob = auth_headers("bob@example.com")
+        course = create_course(alice)
+        client.post(
+            f"/courses/{course['id']}/members", json={"email": "bob@example.com"}, headers=alice
+        )
+
+        client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("a.pptx", _make_pptx("Alice's slide"), "application/x"))],
+            headers=alice,
+        )
+        client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("b.pptx", _make_pptx("Bob's slide"), "application/x"))],
+            headers=bob,
+        )
+
+        alice_id = client.get("/auth/me", headers=alice).json()["id"]
+        bob_id = client.get("/auth/me", headers=bob).json()["id"]
+        prefixes = {key.split("/")[0] for key in fake_storage.objects}
+        assert prefixes == {alice_id, bob_id}
 
     def test_too_many_files_are_rejected(self) -> None:
         headers = auth_headers()
