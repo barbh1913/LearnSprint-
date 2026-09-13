@@ -17,6 +17,8 @@ function block(overrides: Partial<ScheduleBlock> = {}): ScheduleBlock {
     actionType: 'read',
     actionId: 'a1',
     label: 'Read: Trees',
+    courseId: 'c1',
+    courseName: 'Data Structures',
     ...overrides,
   }
 }
@@ -120,6 +122,29 @@ describe('WeekGrid', () => {
 
     expect(screen.getByText('Prepare exam study aids')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /study aids/ })).not.toBeInTheDocument()
+  })
+
+  it('labels each session with its course only when asked to', () => {
+    const { rerender } = render(
+      <WeekGrid weekStart={weekStart} blocks={[block()]} range={range} today={today} onSelectBlock={vi.fn()} />,
+    )
+    expect(screen.getByRole('button', { name: 'Read: Trees, 06:00 PM–07:30 PM' })).toBeInTheDocument()
+    expect(screen.queryByText('Data Structures')).not.toBeInTheDocument()
+
+    rerender(
+      <WeekGrid
+        weekStart={weekStart}
+        blocks={[block()]}
+        range={range}
+        today={today}
+        showCourse
+        onSelectBlock={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByRole('button', { name: 'Read: Trees, Data Structures, 06:00 PM–07:30 PM' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Data Structures')).toBeInTheDocument()
   })
 
   it('leaves out blocks from other weeks', () => {

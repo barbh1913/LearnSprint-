@@ -1,23 +1,34 @@
 """Wires stored data into the allocation algorithm (FR3.1-FR3.3).
 
+One plan per student (ADR 0011): every course with an exam date is scheduled
+in turn, nearest exam first, and each course's sessions are handed to the next
+course as occupied time - so the plans never overlap. A single course's
+schedule is that course's entry in the combined plan, never a separate run.
+
 The use case does the fetching and mapping; the algorithm itself stays pure and
 knows nothing about DynamoDB. The result is never saved - see ADR 0005.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Any
 
 from features.academic_profile.infrastructure import repository as course_repo
 from features.content_topics.infrastructure import repository as topic_repo
 from features.progress.infrastructure import repository as progress_repo
-from features.scheduling.domain.allocation import generate_schedule
+from features.scheduling.domain.allocation import (
+    find_available_windows,
+    generate_schedule,
+    round_up_to_slot,
+)
 from features.scheduling.domain.models import (
     ActionType,
     BlockedSlot,
     ExamType,
     PendingAction,
+    Schedule,
     SchedulingResult,
     TimePreference,
     TopicToSchedule,
@@ -28,14 +39,101 @@ class CourseNotScheduled(Exception):
     """Raised when the course has no exam date, so there's nothing to plan towards."""
 
 
-def build_schedule_for_course(user_id: str, course_id: str, *, now: datetime | None = None) -> SchedulingResult:
-    course = course_repo.get_course(course_id)
-    if course is None or not course.get("examDate"):
-        raise CourseNotScheduled(course_id)
+@dataclass(frozen=True)
+class CoursePlan:
+    """One course's slice of the student's combined plan."""
 
-    exam_date = _parse_datetime(course["examDate"])
+    course_id: str
+    course_name: str
+    exam_date: datetime
+    result: SchedulingResult
+
+
+@dataclass(frozen=True)
+class StudentPlan:
+    """Every schedulable course, in the order it was given the hours: nearest exam first."""
+
+    courses: list[CoursePlan]
+    planned_from: datetime
+    # Free study minutes from now to the latest exam, before any course took them -
+    # the "free time" figure for the all-courses view.
+    total_available_minutes: int
+
+
+def build_plan_for_student(user_id: str, *, now: datetime | None = None) -> StudentPlan:
+    # Naive local time throughout: blocked slots are wall-clock ("09:00"), so
+    # mixing in a UTC-aware `now` would compare apples to oranges.
+    moment = round_up_to_slot(now or datetime.now())
     constraints = course_repo.get_constraints(user_id)
 
+    courses = [
+        course
+        for course in (
+            course_repo.get_course(membership["courseId"])
+            for membership in course_repo.list_memberships(user_id)
+        )
+        if course is not None and course.get("examDate")
+    ]
+    courses.sort(key=_scheduling_order)
+
+    plans: list[CoursePlan] = []
+    occupied: list[tuple[datetime, datetime]] = []
+    for course in courses:
+        result = _schedule_course(user_id, course, constraints, now=moment, occupied=occupied)
+        if isinstance(result, Schedule):
+            occupied.extend((block.start, block.end) for block in result.blocks)
+        plans.append(
+            CoursePlan(
+                course_id=course["id"],
+                course_name=course.get("name", "Course"),
+                exam_date=_parse_datetime(course["examDate"]),
+                result=result,
+            )
+        )
+
+    return StudentPlan(
+        courses=plans,
+        planned_from=moment,
+        total_available_minutes=_free_minutes_until(
+            max((plan.exam_date for plan in plans), default=moment), constraints, now=moment
+        ),
+    )
+
+
+def build_schedule_for_course(
+    user_id: str, course_id: str, *, now: datetime | None = None
+) -> SchedulingResult:
+    """This course's slice of the combined plan - the same times the all-courses view shows."""
+    for plan in build_plan_for_student(user_id, now=now).courses:
+        if plan.course_id == course_id:
+            return plan.result
+    raise CourseNotScheduled(course_id)
+
+
+def _free_minutes_until(exam_date: datetime, constraints: dict[str, Any], *, now: datetime) -> int:
+    windows = find_available_windows(
+        now=now,
+        exam_date=exam_date,
+        blocked_slots=[_to_blocked_slot(slot) for slot in constraints.get("blockedSlots", [])],
+        time_preference=TimePreference(constraints.get("timePreference", "evening")),
+    )
+    return sum(int((end - start).total_seconds() // 60) for start, end in windows)
+
+
+def _scheduling_order(course: dict[str, Any]) -> tuple[datetime, str, str]:
+    """Earliest exam first; a deterministic tie-breaker so equal dates never reorder between requests."""
+    return (_parse_datetime(course["examDate"]), course.get("name", "").lower(), course["id"])
+
+
+def _schedule_course(
+    user_id: str,
+    course: dict[str, Any],
+    constraints: dict[str, Any],
+    *,
+    now: datetime,
+    occupied: list[tuple[datetime, datetime]],
+) -> SchedulingResult:
+    course_id = course["id"]
     topics = topic_repo.list_topics(course_id)
     actions_by_topic = _group_by_topic(topic_repo.list_actions(course_id))
     progress_by_topic = {
@@ -68,15 +166,14 @@ def build_schedule_for_course(user_id: str, course_id: str, *, now: datetime | N
         for topic in topics
     ]
 
-    # Naive local time throughout: blocked slots are wall-clock ("09:00"), so
-    # mixing in a UTC-aware `now` would compare apples to oranges.
     return generate_schedule(
-        now=now or datetime.now(),
-        exam_date=exam_date,
+        now=now,
+        exam_date=_parse_datetime(course["examDate"]),
         topics=to_schedule,
         blocked_slots=[_to_blocked_slot(slot) for slot in constraints.get("blockedSlots", [])],
         time_preference=TimePreference(constraints.get("timePreference", "evening")),
         exam_type=ExamType(course.get("examType", "closed")),
+        occupied=occupied,
     )
 
 

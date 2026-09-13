@@ -12,6 +12,7 @@ import type {
   MasteryLevel,
   Schedule,
   Sprint,
+  StudentPlan,
   Topic,
   TopicStatus,
   User,
@@ -27,6 +28,13 @@ export interface ExtractionResult {
   analysedBy: 'ai' | 'heuristic'
   totalEstimatedMinutes: number
   note: string | null
+}
+
+export interface GoogleSyncResult {
+  synced: number
+  lastSyncedAt: string
+  /** One entry per course the sync covered; `skipped` carries the reason a course was left out. */
+  courses: { courseId: string; courseName: string; synced: number; skipped: string | null }[]
 }
 
 const TOKEN_KEY = 'learnsprint.token'
@@ -83,6 +91,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   return response.status === 204 ? (undefined as T) : response.json()
+}
+
+async function downloadIcs(path: string, filename: string): Promise<void> {
+  const response = await fetch(apiUrl(path), {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  })
+  if (!response.ok) {
+    throw new ApiError(await readErrorMessage(response), response.status)
+  }
+
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -232,28 +256,24 @@ export const api = {
     }),
   disconnectGoogleCalendar: () =>
     request<void>('/integrations/google-calendar/connection', { method: 'DELETE' }),
-  syncGoogleCalendar: (courseId: string) =>
-    request<{ synced: number; lastSyncedAt: string }>(
-      `/integrations/google-calendar/sync?courseId=${encodeURIComponent(courseId)}`,
+  /** Sync one course, or every course with a plan when no course is given - the Calendar's filter. */
+  syncGoogleCalendar: (courseId?: string) =>
+    request<GoogleSyncResult>(
+      courseId
+        ? `/integrations/google-calendar/sync?courseId=${encodeURIComponent(courseId)}`
+        : '/integrations/google-calendar/sync',
       { method: 'POST' },
     ),
 
-  /** Downloads the plan as .ics so it can be imported into Google Calendar. */
-  downloadScheduleIcs: async (courseId: string, courseName: string) => {
-    const response = await fetch(apiUrl(`/courses/${courseId}/schedule.ics`), {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-    if (!response.ok) {
-      throw new ApiError(await readErrorMessage(response), response.status)
-    }
+  /** The combined plan across every course with an exam date (FR3.1). */
+  getStudentPlan: () => request<StudentPlan>('/schedule'),
 
-    const url = URL.createObjectURL(await response.blob())
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${courseName.replace(/\s+/g, '-').toLowerCase()}.ics`
-    link.click()
-    URL.revokeObjectURL(url)
-  },
+  /** Downloads one course's plan as .ics so it can be imported into Google Calendar. */
+  downloadScheduleIcs: (courseId: string, courseName: string) =>
+    downloadIcs(`/courses/${courseId}/schedule.ics`, `${courseName.replace(/\s+/g, '-').toLowerCase()}.ics`),
+
+  /** Downloads every course that fits as one .ics. */
+  downloadStudentPlanIcs: () => downloadIcs('/schedule.ics', 'learnsprint-study-plan.ics'),
 
   getVelocity: () => request<Velocity>('/velocity'),
 

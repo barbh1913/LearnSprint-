@@ -75,6 +75,9 @@ export interface ScheduleBlock {
   /** Set for action blocks only, so the calendar can open the exact action. */
   actionId: string | null
   label: string
+  /** Which course the session belongs to - what the all-courses calendar labels it with. */
+  courseId: string | null
+  courseName: string | null
 }
 
 export interface Schedule {
@@ -85,6 +88,22 @@ export interface Schedule {
   totalNeededMinutes: number
   reason?: string | null
   shortfallMinutes?: number | null
+}
+
+/** One course's slice of the combined plan (FR3.1). */
+export interface CourseSchedule extends Schedule {
+  courseId: string
+  courseName: string
+  examDate: string
+}
+
+/** Every course's plan, nearest exam first, with the sessions merged in time order. */
+export interface StudentPlan {
+  courses: CourseSchedule[]
+  blocks: ScheduleBlock[]
+  totalAvailableMinutes: number
+  totalNeededMinutes: number
+  sessions: number
 }
 
 /** Whether this student's Google account is linked for calendar sync (FR6.2). Never carries the credential. */

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from features.scheduling.domain.calendar_export import schedule_to_ics
+from features.scheduling.domain.calendar_export import plan_to_ics, schedule_to_ics
 from features.scheduling.domain.models import BlockType, Schedule, ScheduledBlock
 
 
@@ -25,6 +25,29 @@ def make_block(label: str = "Read: Trees") -> ScheduledBlock:
         action_type=None,
         label=label,
     )
+
+
+def test_several_courses_export_as_one_calendar_in_time_order() -> None:
+    late = ScheduledBlock(
+        start=datetime(2026, 9, 11, 18, 0),
+        end=datetime(2026, 9, 11, 19, 0),
+        block_type=BlockType.ACTION,
+        topic_id="t2",
+        topic_name="Classes",
+        action_type=None,
+        label="Read: Classes",
+    )
+
+    ics = plan_to_ics(
+        [("OOP", make_schedule(late)), ("Data Structures", make_schedule(make_block()))],
+        calendar_name="LearnSprint study plan",
+    )
+
+    assert "X-WR-CALNAME:LearnSprint study plan" in ics
+    assert ics.count("BEGIN:VEVENT") == 2
+    assert ics.index("SUMMARY:Read: Trees") < ics.index("SUMMARY:Read: Classes")
+    assert "CATEGORIES:Data Structures" in ics
+    assert "CATEGORIES:OOP" in ics
 
 
 def test_produces_a_valid_calendar_envelope() -> None:

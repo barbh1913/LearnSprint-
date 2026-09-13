@@ -22,6 +22,8 @@ function block(start: string, end: string, label = 'Read: Trees'): ScheduleBlock
     actionType: 'read',
     actionId: 'a1',
     label,
+    courseId: 'c1',
+    courseName: 'Data Structures',
   }
 }
 

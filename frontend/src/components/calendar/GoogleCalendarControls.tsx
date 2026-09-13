@@ -15,7 +15,7 @@ export function GoogleCalendarControls({
   canSync,
   goToExternal = (url) => window.location.assign(url),
 }: {
-  /** The course whose plan "Sync now" pushes; nothing to sync without one. */
+  /** The course "Sync now" pushes, or '' for every course with a plan - the Calendar's filter. */
   courseId: string
   /** False while the plan is infeasible or empty - the button explains instead of failing. */
   canSync: boolean
@@ -70,11 +70,18 @@ export function GoogleCalendarControls({
     setError('')
     setNotice('')
     try {
-      const result = await api.syncGoogleCalendar(courseId)
+      const result = await api.syncGoogleCalendar(courseId || undefined)
+      const skipped = result.courses.filter((course) => course.skipped)
       setNotice(
-        result.synced === 1
-          ? '1 session is now in your Google Calendar.'
-          : `${result.synced} sessions are now in your Google Calendar.`,
+        [
+          result.synced === 1
+            ? '1 session is now in your Google Calendar.'
+            : `${result.synced} sessions are now in your Google Calendar.`,
+          skipped.length > 0 &&
+            `Skipped ${skipped.map((course) => `${course.courseName} (${course.skipped})`).join('; ')}.`,
+        ]
+          .filter(Boolean)
+          .join(' '),
       )
       loadStatus()
     } catch (caught) {
@@ -120,14 +127,8 @@ export function GoogleCalendarControls({
                 size="sm"
                 variant="primary"
                 onClick={handleSync}
-                disabled={isBusy || !courseId || !canSync}
-                title={
-                  !courseId
-                    ? 'Pick a course first'
-                    : !canSync
-                      ? 'There is no plan to sync yet'
-                      : undefined
-                }
+                disabled={isBusy || !canSync}
+                title={canSync ? undefined : 'There is no plan to sync yet'}
               >
                 {isBusy ? 'Syncing' : 'Sync now'}
               </Button>
