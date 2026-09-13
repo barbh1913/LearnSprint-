@@ -14,16 +14,24 @@ import {
 } from '../components/ui/primitives'
 import { TopicDetailDialog } from '../components/TopicDetailDialog'
 import { WeekGrid } from '../components/calendar/WeekGrid'
+import { MonthGrid } from '../components/calendar/MonthGrid'
 import {
   addDays,
+  addMonths,
+  formatMonth,
   formatWeekRange,
   hourRange,
-  initialWeekFor,
+  initialCursorFor,
+  startOfDay,
+  startOfMonth,
   startOfWeek,
 } from '../components/calendar/calendarMath'
 
+type CalendarView = 'week' | 'month'
+
 /**
- * The Calendar (FR6.1): the generated schedule on a weekly time grid.
+ * The Calendar (FR6.1): the generated schedule on a weekly time grid, with a
+ * month overview.
  *
  * Purely a view of what the backend already computed - no scheduling logic
  * here. The schedule is recomputed on each load rather than stored (ADR 0005).
@@ -35,7 +43,9 @@ export function CalendarPage() {
   const [courseId, setCourseId] = useState('')
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [board, setBoard] = useState<Board | null>(null)
-  const [weekStart, setWeekStart] = useState<Date | null>(null)
+  const [view, setView] = useState<CalendarView>('week')
+  // The day in focus: the week view shows its week, the month view its month.
+  const [cursor, setCursor] = useState<Date | null>(null)
   const [selected, setSelected] = useState<{ topicId: string; actionId: string | null } | null>(
     null,
   )
@@ -80,17 +90,17 @@ export function CalendarPage() {
   }, [])
 
   useEffect(() => {
-    setWeekStart(null)
+    setCursor(null)
     loadPlan()
   }, [loadPlan])
 
-  // Land on the first week that has anything in it, but only once per course -
-  // a reload after ticking an action must not yank the user back.
+  // Land where the plan is, but only once per course - a reload after ticking
+  // an action must not yank the user back.
   useEffect(() => {
-    if (schedule && weekStart === null) {
-      setWeekStart(initialWeekFor(schedule.blocks, today))
+    if (schedule && cursor === null) {
+      setCursor(initialCursorFor(schedule.blocks, today))
     }
-  }, [schedule, weekStart, today])
+  }, [schedule, cursor, today])
 
   const cardsByTopic = useMemo(
     () => new Map((board?.cards ?? []).map((card) => [card.topicId, card])),
@@ -116,6 +126,16 @@ export function CalendarPage() {
     if (block.topicId && cardsByTopic.has(block.topicId)) {
       setSelected({ topicId: block.topicId, actionId: block.actionId })
     }
+  }
+
+  function shiftCursor(direction: -1 | 1) {
+    if (!cursor) return
+    setCursor(view === 'week' ? addDays(cursor, 7 * direction) : addMonths(cursor, direction))
+  }
+
+  function showDayInWeek(day: Date) {
+    setCursor(day)
+    setView('week')
   }
 
   if (isLoading) return <Spinner label="Loading calendar" />
@@ -208,45 +228,72 @@ export function CalendarPage() {
       ) : (
         hasPlan &&
         schedule &&
-        weekStart && (
+        cursor && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-1">
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setWeekStart(addDays(weekStart, -7))}
-                  aria-label="Previous week"
+                  onClick={() => shiftCursor(-1)}
+                  aria-label={`Previous ${view}`}
                 >
                   <ChevronLeft className="size-4" aria-hidden />
                 </Button>
-                <Button size="sm" onClick={() => setWeekStart(startOfWeek(today))}>
+                <Button size="sm" onClick={() => setCursor(startOfDay(today))}>
                   Today
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setWeekStart(addDays(weekStart, 7))}
-                  aria-label="Next week"
+                  onClick={() => shiftCursor(1)}
+                  aria-label={`Next ${view}`}
                 >
                   <ChevronRight className="size-4" aria-hidden />
                 </Button>
-                <span className="ml-2 text-sm font-medium">{formatWeekRange(weekStart)}</span>
+                <span className="ml-2 text-sm font-medium">
+                  {view === 'week' ? formatWeekRange(startOfWeek(cursor)) : formatMonth(cursor)}
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge tone="success">Action</Badge>
-                <Badge tone="accent">Review</Badge>
-                <Badge tone="warning">Study aids</Badge>
+
+              <div className="flex items-center gap-3">
+                <div className="hidden items-center gap-2 sm:flex">
+                  <Badge tone="success">Action</Badge>
+                  <Badge tone="accent">Review</Badge>
+                  <Badge tone="warning">Study aids</Badge>
+                </div>
+                <div className="flex items-center gap-1" role="group" aria-label="Calendar view">
+                  {(['week', 'month'] as const).map((option) => (
+                    <Button
+                      key={option}
+                      size="sm"
+                      variant={view === option ? 'primary' : 'ghost'}
+                      aria-pressed={view === option}
+                      onClick={() => setView(option)}
+                    >
+                      {option === 'week' ? 'Week' : 'Month'}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <WeekGrid
-              weekStart={weekStart}
-              blocks={schedule.blocks}
-              range={range}
-              today={today}
-              onSelectBlock={handleSelectBlock}
-            />
+            {view === 'week' ? (
+              <WeekGrid
+                weekStart={startOfWeek(cursor)}
+                blocks={schedule.blocks}
+                range={range}
+                today={today}
+                onSelectBlock={handleSelectBlock}
+              />
+            ) : (
+              <MonthGrid
+                month={startOfMonth(cursor)}
+                blocks={schedule.blocks}
+                today={today}
+                onSelectDay={showDayInWeek}
+              />
+            )}
           </div>
         )
       )}

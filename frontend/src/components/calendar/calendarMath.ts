@@ -91,21 +91,42 @@ export function placement(
   return { top: start - rangeStart, height: end - start }
 }
 
-/** The week to open on: this week, unless the whole plan lies ahead - then the plan's first week. */
-export function initialWeekFor(blocks: ScheduleBlock[], today: Date): Date {
-  const thisWeek = startOfWeek(today)
-  if (blocks.length === 0) return thisWeek
+/** The day to open on: today, unless the whole plan lies ahead - then the plan's first day. */
+export function initialCursorFor(blocks: ScheduleBlock[], today: Date): Date {
+  if (blocks.length === 0) return startOfDay(today)
 
   const firstStart = blocks.reduce((earliest, block) => {
     const start = new Date(block.start)
     return start < earliest ? start : earliest
   }, new Date(blocks[0].start))
 
-  return firstStart >= addDays(thisWeek, 7) ? startOfWeek(firstStart) : thisWeek
+  const nextWeek = addDays(startOfWeek(today), 7)
+  return firstStart >= nextWeek ? startOfDay(firstStart) : startOfDay(today)
+}
+
+export function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+/** Steps by whole months from the 1st, so Jan 31 + 1 month is Feb 1, not Mar 3. */
+export function addMonths(date: Date, months: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1)
+}
+
+const MONTH_GRID_DAYS = 6 * 7
+
+/** The 42 days a month view shows: six full Sunday-to-Saturday rows around the month. */
+export function monthGrid(date: Date): Date[] {
+  const gridStart = startOfWeek(startOfMonth(date))
+  return Array.from({ length: MONTH_GRID_DAYS }, (_, index) => addDays(gridStart, index))
 }
 
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+}
+
+export function formatMonth(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 }
 
 export function formatWeekRange(weekStart: Date): string {

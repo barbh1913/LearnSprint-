@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ScheduleBlock } from '../../types'
 import {
+  addMonths,
   blocksOnDay,
   hourRange,
-  initialWeekFor,
+  initialCursorFor,
+  monthGrid,
   placement,
   startOfWeek,
   weekDays,
@@ -100,28 +102,53 @@ describe('placement', () => {
   })
 })
 
-describe('initialWeekFor', () => {
-  const today = new Date(2026, 8, 16) // Wednesday
+describe('monthGrid', () => {
+  it('covers six Sunday-to-Saturday rows around the month', () => {
+    // September 2026 starts on a Tuesday.
+    const days = monthGrid(new Date(2026, 8, 16))
 
-  it('opens on this week when there is no plan', () => {
-    expect(initialWeekFor([], today).getDate()).toBe(13)
+    expect(days).toHaveLength(42)
+    expect(days[0].getDay()).toBe(0)
+    expect(days[0].getMonth()).toBe(7)
+    expect(days[0].getDate()).toBe(30)
+    expect(days[2].getDate()).toBe(1)
+    expect(days[41].getMonth()).toBe(9)
+    expect(days[41].getDate()).toBe(10)
+  })
+})
+
+describe('addMonths', () => {
+  it('lands on the first of the target month even from a long month', () => {
+    const next = addMonths(new Date(2026, 0, 31), 1)
+
+    expect(next.getMonth()).toBe(1)
+    expect(next.getDate()).toBe(1)
+  })
+})
+
+describe('initialCursorFor', () => {
+  const today = new Date(2026, 8, 16, 11, 45) // Wednesday
+
+  it('opens on today when there is no plan', () => {
+    expect(initialCursorFor([], today).getDate()).toBe(16)
   })
 
-  it('opens on this week when the plan has already started', () => {
+  it('opens on today when the plan has already started', () => {
     const blocks = [block('2026-09-10T18:00:00', '2026-09-10T19:00:00')]
 
-    expect(initialWeekFor(blocks, today).getDate()).toBe(13)
+    expect(initialCursorFor(blocks, today).getDate()).toBe(16)
   })
 
-  it('jumps ahead when the whole plan is in a later week', () => {
+  it('jumps to the first session when the whole plan is in a later week', () => {
     const blocks = [
       block('2026-09-28T18:00:00', '2026-09-28T19:00:00'),
       block('2026-09-22T18:00:00', '2026-09-22T19:00:00'),
     ]
 
-    const week = initialWeekFor(blocks, today)
+    const cursor = initialCursorFor(blocks, today)
 
-    expect(week.getMonth()).toBe(8)
-    expect(week.getDate()).toBe(20)
+    expect(cursor.getMonth()).toBe(8)
+    expect(cursor.getDate()).toBe(22)
+    expect(cursor.getHours()).toBe(0)
   })
 })

@@ -115,6 +115,28 @@ describe('CalendarPage', () => {
     expect(screen.getByRole('button', { name: /Read: Trees/ })).toBeInTheDocument()
   })
 
+  it('switches to a month overview and back to the week of a clicked day', async () => {
+    mockApi({ '/courses': [course], '/courses/c1/schedule': schedule, '/board': board })
+    renderPage()
+    await screen.findByRole('button', { name: /Read: Trees/ })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Month' }))
+
+    expect(screen.getByText('September 2026')).toBeInTheDocument()
+    expect(screen.getByText('Read: Trees')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Read: Trees/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next month' }))
+    expect(screen.getByText('October 2026')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Monday, September 14' }))
+
+    expect(screen.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /Read: Trees/ })).toBeInTheDocument()
+    expect(screen.getByText(/Sep 13/)).toBeInTheDocument()
+  })
+
   it('opens the topic behind an event with that action highlighted', async () => {
     mockApi({ '/courses': [course], '/courses/c1/schedule': schedule, '/board': board })
     renderPage()
