@@ -11,6 +11,7 @@ erDiagram
     USER ||--o{ COURSE_MEMBERSHIP : "enrolled via"
     USER ||--|| USER_CONSTRAINTS : "defines"
     USER ||--o| AI_SETTINGS : "configures"
+    USER ||--o| GOOGLE_CALENDAR_CONNECTION : "connects"
     USER ||--o{ USER_TOPIC_PROGRESS : "rates"
     USER ||--o{ USER_ACTION_PROGRESS : "completes"
 
@@ -75,11 +76,19 @@ erDiagram
         bool aiEnabled
         string apiKey
     }
+    GOOGLE_CALENDAR_CONNECTION {
+        string userId FK
+        string refreshToken
+        string googleEmail
+        string googleCalendarId
+        string connectedAt
+        string lastSyncedAt
+    }
 ```
 
 ## Shared vs. private — the rule that shapes everything
 
-Course *content* is shared: a `Course`, its `Topic`s and their `LearningAction`s are one set of records that every enrolled student sees identically. Anything *personal* — the grade, the mastery rating, what's been completed, the blocked hours, the AI key — is stored per user.
+Course *content* is shared: a `Course`, its `Topic`s and their `LearningAction`s are one set of records that every enrolled student sees identically. Anything *personal* — the grade, the mastery rating, what's been completed, the blocked hours, the AI key, the Google Calendar credential — is stored per user.
 
 This is a structural guarantee, not a UI filter. There is no `finalGrade` column on `Course` that we remember to hide; the grade lives on the student's own `CourseMembership` record, so there is no query that could return another student's grade by accident. The same holds for mastery ratings and progress, which is what makes the Study Groups privacy requirement (FR5.4) true by construction.
 
@@ -96,6 +105,7 @@ DynamoDB has one table with a composite key (`PK`, `SK`) plus one global seconda
 | User | `USER#<userId>` | `PROFILE` | `EMAIL#<email>` | `USER#<userId>` |
 | UserConstraints | `USER#<userId>` | `CONSTRAINTS` | — | — |
 | AiSettings | `USER#<userId>` | `AI_SETTINGS` | — | — |
+| GoogleCalendarConnection | `USER#<userId>` | `GOOGLE_CALENDAR` | — | — |
 | CourseMembership | `USER#<userId>` | `COURSE#<courseId>` | `COURSE#<courseId>` | `USER#<userId>` |
 | UserTopicProgress | `USER#<userId>` | `TPROG#<topicId>` | — | — |
 | UserActionProgress | `USER#<userId>` | `APROG#<actionId>` | — | — |
@@ -121,6 +131,7 @@ Every query the application makes, and how the keys serve it:
 | Load my progress | Query `PK=USER#<id>`, `SK` begins with `TPROG#` / `APROG#` |
 | List a course's members (FR5.3) | GSI1 query on `COURSE#<id>` — the reverse of the membership record |
 | Compute my weighted average | Query my memberships; course name, credits and semester are denormalised onto each membership record, so no second lookup is needed |
+| Sync my plan to Google Calendar (FR6.2) | Get `PK=USER#<id>`, `SK=GOOGLE_CALENDAR` — one item, read only server-side; the plan itself is recomputed, never read from storage |
 
 ## Denormalisation
 
@@ -133,5 +144,7 @@ Course files a student uploads are stored in a separate bucket (`learnsprint-upl
 ## What is *not* stored
 
 **The generated schedule.** FR3.1–FR3.3 produce time blocks, and those are computed on demand and returned — never written back. See [ADR 0005](adr/0005-schedule-not-persisted.md).
+
+**Synced Google Calendar events.** FR6.2 keeps no per-event bookkeeping: each sync replaces the whole LearnSprint-owned calendar with the freshly recomputed plan, so there are no Google event ids to store and nothing that could drift out of step with the schedule ([ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md)). Only the connection itself (`GoogleCalendarConnection`) is stored.
 
 **Sprint state.** A sprint isn't a record either. It's derived: the week is computed from the current date, capacity from `UserConstraints`, and the commitment from whichever topics currently sit in `todo` / `in_progress`. Moving a card *is* changing the sprint, so there is nothing separate to keep in sync.

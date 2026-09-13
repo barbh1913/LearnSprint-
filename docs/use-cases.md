@@ -2,7 +2,7 @@
 
 All use cases share one actor unless stated otherwise: **Student** — an authenticated user. The **System** is the second actor throughout.
 
-UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were built after the core on purpose so they landed on a stable data model — see the scope note in [CLAUDE.md](../CLAUDE.md).
+UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were built after the core on purpose so they landed on a stable data model — see the scope note in [CLAUDE.md](../CLAUDE.md). UC13 covers the optional Google Calendar sync.
 
 ---
 
@@ -113,7 +113,7 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 3. System schedules each unfinished learning action, weakest topics first.
 4. System adds a final review session, splitting its time **inversely by mastery** — a topic rated 1 gets far more review time than one rated 5.
 5. If the exam allows open material or a formula sheet, System reserves time to prepare those aids.
-6. System renders the plan as a weekly timeline.
+6. System renders the plan in the Calendar — a weekly time grid, with a month view — where each block is an event at its planned time and opens the topic's details when clicked (FR6.1).
 
 **Alternative flows:**
 - *Not enough time for the full plan ("the exam is tomorrow")* — System switches to **emergency mode**: it drops the individual read/summarise/quiz actions and produces one condensed review session split **equally** across topics, and says so.
@@ -173,3 +173,24 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 **Requirement:** FR5.3, FR5.4
 **Main flow:** each member sees a coarse completion percentage for every other member — enough for peer motivation.
 **Constraint:** grades, time constraints, and personal schedules are never exposed. The data model enforces this by construction rather than by filtering (see [docs/erd.md](erd.md)).
+
+---
+
+## UC13 — Connect and sync Google Calendar
+
+**Requirement:** FR6.2
+**Precondition:** Student is signed in; a course has a feasible study plan (UC7).
+**Main flow:**
+1. Student opens the Calendar and chooses "Connect Google Calendar".
+2. System sends the Student to Google's consent screen — a separate consent from Google sign-in ([ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md)); the Student grants access.
+3. System stores the credential and creates a calendar named "LearnSprint" in the Student's Google account.
+4. Student chooses "Sync now" for a course.
+5. System recomputes the plan (UC7) and replaces the LearnSprint calendar's events with it.
+
+**Alternative flows:**
+- *Consent denied or cancelled* — nothing is stored; the Calendar shows "Not connected".
+- *Plan infeasible* — System refuses to sync (409) and shows the same message as UC7; there is nothing sensible to put on a calendar.
+- *Google credential expired or revoked* — System reports that a reconnect is needed rather than failing quietly. The LearnSprint Calendar keeps working regardless — Google is a mirror, never the source.
+- *Student disconnects* — System removes the LearnSprint calendar from Google (best effort) and discards the credential.
+
+**Postcondition:** the plan is visible in Google Calendar. The LearnSprint Calendar stays the source of truth, and syncing again never duplicates events.

@@ -12,7 +12,7 @@
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
 | S3 (uploads) | `learnsprint-uploads-835505308330` — one key per file, under `{userId}/{courseId}/...` |
 | CloudFront | `E2GSBED87C32YJ` |
-| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint |
+| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint (+5 for Google Calendar sync once created — see below) |
 | CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
 ## One remaining step: add the GitHub secrets
@@ -78,6 +78,32 @@ aws s3 cp dist/index.html s3://learnsprint-frontend-835505308330/index.html --ca
 aws cloudfront create-invalidation --distribution-id E2GSBED87C32YJ --paths "/index.html"
 ```
 Only `index.html` needs invalidating — every other asset is content-hashed, so a code change always produces a new filename.
+
+## Google Calendar sync (FR6.2) — one-time manual setup
+
+`deploy-backend.yml` ships the code, but it only runs `update-function-code`: environment variables and API Gateway routes are not part of the package and have to be set once by hand. See [ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md) for why this is a separate Google OAuth client rather than the Cognito sign-in.
+
+**1. Google Cloud console** (any project — a new one is fine):
+- APIs & Services → Library → enable **Google Calendar API**.
+- OAuth consent screen: user type **External**, publishing status **Testing**, and add the Google accounts that will use it (yours, any grader) as **test users**. Scope: `https://www.googleapis.com/auth/calendar.app.created` if the console offers it (only calendars the app itself created — a non-sensitive scope); otherwise `https://www.googleapis.com/auth/calendar.events`.
+- Credentials → Create credentials → **OAuth client ID → Web application**. Authorized redirect URIs: `http://localhost:5173/calendar/google/callback` and `https://d6dbklbpa5amn.cloudfront.net/calendar/google/callback`. Keep the client id and secret.
+- Known limitation of **Testing** status: Google expires refresh tokens after **7 days**, so a connected student has to reconnect weekly. Publishing to Production removes that but sends the app through Google's verification review — not worth it for a class project.
+
+**2. Lambda environment** — `learnsprint-scheduling` only (the sync code lives in the `scheduling` feature, no new function):
+```
+aws lambda update-function-configuration --function-name learnsprint-scheduling --environment "Variables={GOOGLE_CALENDAR_CLIENT_ID=...,GOOGLE_CALENDAR_CLIENT_SECRET=...,GOOGLE_CALENDAR_REDIRECT_URI=https://d6dbklbpa5amn.cloudfront.net/calendar/google/callback}"
+```
+`--environment` replaces the whole variable map, so include any variables the function already has (`aws lambda get-function-configuration --function-name learnsprint-scheduling --query Environment`). The same three values go in `backend/.env` for local development.
+
+**3. API Gateway routes** — five new exact routes, all pointing at the `learnsprint-scheduling` integration (copy its id from the existing `GET /courses/{course_id}/schedule` route):
+```
+GET    /integrations/google-calendar/status
+GET    /integrations/google-calendar/authorize
+POST   /integrations/google-calendar/callback
+POST   /integrations/google-calendar/sync
+DELETE /integrations/google-calendar/connection
+```
+Nothing changes on the frontend side — the backend builds the Google authorize URL, so the client id and secret never reach the browser and no new `VITE_` variable is needed.
 
 ## Workflows
 

@@ -79,8 +79,9 @@ Manual drags are an override, not the primary mechanism — the system still der
 
 > Built, in `backend/src/features/study_groups/`. This was deliberately sequenced after the single-user core so the sharing layer landed on a stable data model rather than shaping it — and it paid off: the shared/private split (see the Data Dictionary) meant FR5.4 privacy held by construction, with no retrofit. The one rule that decides what one member may see of another lives in `study_groups/domain/peer_view.py`.
 
-### 6. Visual timeline (Gantt)
-- **FR6.1** — A weekly Gantt-style view renders the schedule already produced by FR3.1–FR3.3 as time blocks across the days of the week, grouped by topic. This is a visualization of existing schedule output — no new scheduling logic.
+### 6. Calendar
+- **FR6.1** — A Calendar view renders the schedule already produced by FR3.1–FR3.3 in a real weekly time grid (Sunday–Saturday, the same week as the sprint in FR4.0), with an optional month view. Every scheduled block — a learning action, the review session, or study-aid preparation — appears as a calendar event at its planned date and time, and clicking an event opens that topic's detail view with the action highlighted. The course filter and the plan's summary metrics (free time, planned time, sessions) stay at the top. This is a visualization of existing schedule output — no new scheduling logic. It replaces the earlier Gantt-style list; there is no separate Gantt view.
+- **FR6.2** — Optional Google Calendar sync. The LearnSprint Calendar is the primary schedule; a student may additionally connect their Google account (a separate consent from Google sign-in — see [ADR 0010](docs/adr/0010-google-calendar-sync-via-direct-api.md)) and sync the current plan into a dedicated "LearnSprint" calendar the app creates in their Google account. Sync is manual ("Sync now") and **replaces** that calendar's events with the current plan, so syncing again never duplicates; disconnecting removes the calendar and the stored credential. The app never writes to the student's own calendars. The `.ics` download stays available as the no-account alternative.
 
 ### 7. Study velocity
 - **FR7.1** — The dashboard shows a "study velocity" indicator: completed learning actions per week (`UserActionProgress.completedAt`) and the recent trend in average mastery (`UserTopicProgress.masteryLevel`), computed from existing progress data.
@@ -93,7 +94,7 @@ Manual drags are an override, not the primary mechanism — the system still der
 
 Full use cases with alternative flows and postconditions: **[docs/use-cases.md](docs/use-cases.md)**.
 
-UC1 register/sign in · UC2 define time constraints · UC3 set up a course · UC4 upload material and extract topics · UC5 enable AI analysis · UC6 **plan the weekly sprint** (the core loop) · UC7 generate a study plan · UC8 study and record progress · UC9 track grades and progress · UC10–UC12 Study Groups.
+UC1 register/sign in · UC2 define time constraints · UC3 set up a course · UC4 upload material and extract topics · UC5 enable AI analysis · UC6 **plan the weekly sprint** (the core loop) · UC7 generate a study plan · UC8 study and record progress · UC9 track grades and progress · UC10–UC12 Study Groups · UC13 connect and sync Google Calendar.
 
 ## Data Dictionary
 
@@ -110,6 +111,7 @@ Full data model and DynamoDB key design: [docs/erd.md](docs/erd.md). Some data i
 | **UserActionProgress** | `userId`, `actionId`, `isDone: boolean`, `completedAt?: DateTime` | Private |
 | **UserConstraints** | `userId`, `blockedSlots: {day, startTime, endTime}[]`, `timePreference: 'morning' \| 'evening'` | Private |
 | **AiSettings** | `userId`, `aiEnabled: boolean`, `apiKey` | Private — **never returned by any API response and never logged** (FR2.7) |
+| **GoogleCalendarConnection** | `userId`, `refreshToken`, `googleEmail?`, `googleCalendarId`, `connectedAt`, `lastSyncedAt?` | Private — `refreshToken` is **never returned by any API response and never logged**; `googleCalendarId` is the one LearnSprint-owned calendar in that student's Google account (FR6.2) |
 | **Friendship** | `id`, `userId`, `friendId`, `status: 'pending' \| 'accepted'` | Private (visible only to the two users involved) — FR8, not built |
 
 Define these as explicit types in the backend Domain layer (Python dataclasses or Pydantic models, per feature) and mirror them as TypeScript types on the frontend — reuse consistently within each side, no duplicate near-identical types.
