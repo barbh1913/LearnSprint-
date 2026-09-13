@@ -61,7 +61,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.S3_ROLE_ARN }}
           aws-region: il-central-1
 
       # Hashed assets are immutable and cached hard; index.html must never be
