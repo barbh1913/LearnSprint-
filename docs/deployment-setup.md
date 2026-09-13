@@ -12,7 +12,7 @@
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
 | S3 (uploads) | `learnsprint-uploads-835505308330` — one key per file, under `{userId}/{courseId}/...` |
 | CloudFront | `E2GSBED87C32YJ` |
-| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint (+5 for Google Calendar sync once created — see below) |
+| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint (+7 for the Calendar: the all-courses plan and Google Calendar sync — see below) |
 | CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
 ## One remaining step: add the GitHub secrets
@@ -95,14 +95,17 @@ aws lambda update-function-configuration --function-name learnsprint-scheduling 
 ```
 `--environment` replaces the whole variable map, so include any variables the function already has (`aws lambda get-function-configuration --function-name learnsprint-scheduling --query Environment`). The same three values go in `backend/.env` for local development.
 
-**3. API Gateway routes** — five new exact routes, all pointing at the `learnsprint-scheduling` integration (copy its id from the existing `GET /courses/{course_id}/schedule` route):
+**3. API Gateway routes** — seven new exact routes, all pointing at the `learnsprint-scheduling` integration (copy its id from the existing `GET /courses/{course_id}/schedule` route). The first two are the all-courses Calendar (FR3.1/FR6.1) and are needed even without Google; the rest are the sync:
 ```
+GET    /schedule
+GET    /schedule.ics
 GET    /integrations/google-calendar/status
 GET    /integrations/google-calendar/authorize
 POST   /integrations/google-calendar/callback
 POST   /integrations/google-calendar/sync
 DELETE /integrations/google-calendar/connection
 ```
+`POST /integrations/google-calendar/sync` takes an optional `courseId` query parameter; without it every course with a plan is synced.
 Nothing changes on the frontend side — the backend builds the Google authorize URL, so the client id and secret never reach the browser and no new `VITE_` variable is needed.
 
 ## Workflows
