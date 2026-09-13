@@ -7,6 +7,7 @@ import { ACTION_LABELS, STATUS_LABELS } from '../types'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import { Badge, ErrorNote, Input } from './ui/primitives'
 import { MasteryPicker } from './MasteryPicker'
+import { cn } from '../lib/utils'
 
 /**
  * Jira/Linear-style detail view for one topic, opened from the board (FR4.1)
@@ -16,10 +17,13 @@ import { MasteryPicker } from './MasteryPicker'
  */
 export function TopicDetailDialog({
   card,
+  highlightActionId = null,
   onClose,
   onChanged,
 }: {
   card: BoardCard | null
+  /** The action the user came from - a calendar event points at one action, not the whole topic. */
+  highlightActionId?: string | null
   onClose: () => void
   onChanged: () => void
 }) {
@@ -120,7 +124,10 @@ export function TopicDetailDialog({
               {card.actions.map((action) => (
                 <div
                   key={action.id}
-                  className="flex items-center gap-3 rounded-lg border border-border p-2.5"
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg border border-border p-2.5',
+                    action.id === highlightActionId && 'border-primary ring-2 ring-primary/30',
+                  )}
                 >
                   <input
                     type="checkbox"

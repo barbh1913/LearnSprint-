@@ -237,6 +237,7 @@ def _build_full_schedule(
                     topic_name=topic.name,
                     action_type=action.action_type,
                     label=f"{action.action_type.value.capitalize()}: {topic.name}",
+                    action_id=action.action_id,
                 )
             )
 
@@ -315,7 +316,15 @@ def _build_emergency_schedule(
 class _BlockRequest:
     """"Schedule N minutes of X" - the caller says what, _place_blocks decides when."""
 
-    __slots__ = ("minutes", "block_type", "topic_id", "topic_name", "action_type", "label")
+    __slots__ = (
+        "minutes",
+        "block_type",
+        "topic_id",
+        "topic_name",
+        "action_type",
+        "label",
+        "action_id",
+    )
 
     def __init__(
         self,
@@ -325,6 +334,7 @@ class _BlockRequest:
         topic_name: str | None,
         action_type: object | None,
         label: str,
+        action_id: str | None = None,
     ) -> None:
         self.minutes = minutes
         self.block_type = block_type
@@ -332,6 +342,7 @@ class _BlockRequest:
         self.topic_name = topic_name
         self.action_type = action_type
         self.label = label
+        self.action_id = action_id
 
 
 def _place_blocks(
@@ -370,6 +381,7 @@ def _place_blocks(
                     topic_name=request.topic_name,
                     action_type=request.action_type,  # type: ignore[arg-type]
                     label=request.label,
+                    action_id=request.action_id,
                 )
             )
             cursor = block_end

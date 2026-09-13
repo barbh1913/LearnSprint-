@@ -7,6 +7,7 @@ import type {
   Course,
   CourseMember,
   ExamType,
+  GoogleCalendarStatus,
   Grades,
   MasteryLevel,
   Schedule,
@@ -217,6 +218,25 @@ export const api = {
     ),
 
   getSchedule: (courseId: string) => request<Schedule>(`/courses/${courseId}/schedule`),
+
+  // Google Calendar sync (FR6.2). The backend builds the consent URL so the
+  // Google client id and secret never reach the browser.
+  getGoogleCalendarStatus: () =>
+    request<GoogleCalendarStatus>('/integrations/google-calendar/status'),
+  getGoogleCalendarAuthorizeUrl: () =>
+    request<{ authorizeUrl: string; state: string }>('/integrations/google-calendar/authorize'),
+  connectGoogleCalendar: (code: string) =>
+    request<GoogleCalendarStatus>('/integrations/google-calendar/callback', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+  disconnectGoogleCalendar: () =>
+    request<void>('/integrations/google-calendar/connection', { method: 'DELETE' }),
+  syncGoogleCalendar: (courseId: string) =>
+    request<{ synced: number; lastSyncedAt: string }>(
+      `/integrations/google-calendar/sync?courseId=${encodeURIComponent(courseId)}`,
+      { method: 'POST' },
+    ),
 
   /** Downloads the plan as .ics so it can be imported into Google Calendar. */
   downloadScheduleIcs: async (courseId: string, courseName: string) => {

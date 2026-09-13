@@ -75,6 +75,8 @@ class ScheduledBlock:
     topic_name: str | None
     action_type: ActionType | None
     label: str
+    # Set for ACTION blocks only, so the calendar can open the exact action (FR6.1).
+    action_id: str | None = None
 
     @property
     def duration_minutes(self) -> int:

@@ -1,18 +1,20 @@
-"""Schedule endpoint (FR3.1-FR3.3, and the data behind the Gantt view FR6.1)."""
+"""Schedule endpoint (FR3.1-FR3.3, and the data behind the Calendar view FR6.1)."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from features.academic_profile.infrastructure import repository as course_repo
+from features.scheduling.application import google_calendar_connection, sync_google_calendar
 from features.scheduling.application.generate_schedule import (
     CourseNotScheduled,
     build_schedule_for_course,
 )
 from features.scheduling.domain.calendar_export import schedule_to_ics
 from features.scheduling.domain.models import InfeasiblePlan
+from features.scheduling.infrastructure.google_calendar import GoogleCalendarError
 from shared.auth.dependencies import get_current_user_id
 
 router = APIRouter(tags=["scheduling"])
@@ -26,6 +28,7 @@ class BlockOut(BaseModel):
     topicId: str | None
     topicName: str | None
     actionType: str | None
+    actionId: str | None = None
     label: str
 
 
@@ -77,6 +80,7 @@ def get_schedule(course_id: str, user_id: str = Depends(get_current_user_id)) ->
                 topicId=block.topic_id,
                 topicName=block.topic_name,
                 actionType=block.action_type.value if block.action_type else None,
+                actionId=block.action_id,
                 label=block.label,
             )
             for block in result.blocks
@@ -111,6 +115,89 @@ def download_schedule_ics(
             "Content-Disposition": f'attachment; filename="{_safe_filename(course_name)}.ics"'
         },
     )
+
+
+# --- Google Calendar sync (FR6.2) ------------------------------------------
+#
+# The refresh token never appears in any of these responses; the status only
+# says whether a connection exists and when it was last used.
+
+
+class GoogleCalendarStatusOut(BaseModel):
+    configured: bool
+    connected: bool
+    connectedAt: str | None = None
+    lastSyncedAt: str | None = None
+
+
+class GoogleAuthorizeOut(BaseModel):
+    authorizeUrl: str
+    state: str
+
+
+class GoogleCallbackIn(BaseModel):
+    code: str = Field(min_length=1)
+
+
+@router.get("/integrations/google-calendar/status", response_model=GoogleCalendarStatusOut)
+def google_calendar_status(user_id: str = Depends(get_current_user_id)) -> GoogleCalendarStatusOut:
+    return GoogleCalendarStatusOut(**google_calendar_connection.connection_status(user_id))
+
+
+@router.get("/integrations/google-calendar/authorize", response_model=GoogleAuthorizeOut)
+def google_calendar_authorize(_: str = Depends(get_current_user_id)) -> GoogleAuthorizeOut:
+    try:
+        url, state = google_calendar_connection.start_connection()
+    except google_calendar_connection.GoogleCalendarNotConfigured:
+        raise _not_configured()
+    return GoogleAuthorizeOut(authorizeUrl=url, state=state)
+
+
+@router.post("/integrations/google-calendar/callback", response_model=GoogleCalendarStatusOut)
+def google_calendar_callback(
+    payload: GoogleCallbackIn, user_id: str = Depends(get_current_user_id)
+) -> GoogleCalendarStatusOut:
+    try:
+        status = google_calendar_connection.complete_connection(user_id, payload.code)
+    except google_calendar_connection.GoogleCalendarNotConfigured:
+        raise _not_configured()
+    except GoogleCalendarError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return GoogleCalendarStatusOut(**status)
+
+
+@router.delete("/integrations/google-calendar/connection", status_code=204)
+def google_calendar_disconnect(user_id: str = Depends(get_current_user_id)) -> Response:
+    google_calendar_connection.disconnect(user_id)
+    return Response(status_code=204)
+
+
+class GoogleSyncOut(BaseModel):
+    synced: int
+    lastSyncedAt: str
+
+
+@router.post("/integrations/google-calendar/sync", response_model=GoogleSyncOut)
+def google_calendar_sync(courseId: str, user_id: str = Depends(get_current_user_id)) -> GoogleSyncOut:
+    if course_repo.get_membership(user_id, courseId) is None:
+        raise HTTPException(status_code=403, detail="You do not have access to this course")
+
+    try:
+        result = sync_google_calendar.sync_course(user_id, courseId)
+    except CourseNotScheduled as exc:
+        raise HTTPException(
+            status_code=400, detail="Set an exam date for this course to build a schedule"
+        ) from exc
+    except sync_google_calendar.SyncRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GoogleCalendarError as exc:
+        # Includes GoogleReconnectRequired: the message tells the student to connect again.
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return GoogleSyncOut(**result)
+
+
+def _not_configured() -> HTTPException:
+    return HTTPException(status_code=503, detail="Google Calendar sync is not set up on this server")
 
 
 def _safe_filename(name: str) -> str:

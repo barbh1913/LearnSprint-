@@ -11,6 +11,7 @@ key layout is documented in docs/erd.md - in short:
     Action             PK=COURSE#<cid>  SK=TOPIC#<tid>#ACTION#<aid>
     UserTopicProgress  PK=USER#<id>     SK=TPROG#<tid>
     UserActionProgress PK=USER#<id>     SK=APROG#<aid>
+    GoogleCalendarConn PK=USER#<id>     SK=GOOGLE_CALENDAR
 
 Putting a course's topics and actions under the same PK means the whole course
 tree comes back in a single query instead of N round trips.

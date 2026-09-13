@@ -258,10 +258,10 @@ export function DashboardPage() {
                     />
                   )}
                   <QuickAction
-                    to="/gantt"
+                    to="/calendar"
                     icon={CalendarClock}
                     label="See your study plan"
-                    detail="Weekly timeline, exportable to your calendar"
+                    detail="Your sessions on a weekly calendar"
                   />
                   <QuickAction
                     to="/profile"

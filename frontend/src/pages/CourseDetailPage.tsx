@@ -206,7 +206,7 @@ export function CourseDetailPage() {
           <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950">
             <p className="text-sm text-emerald-900 dark:text-emerald-200">{uploadNote}</p>
             <Link
-              to="/gantt"
+              to="/calendar"
               className="mt-1 inline-block text-sm font-medium text-emerald-800 underline dark:text-emerald-300"
             >
               See the study sessions this created
