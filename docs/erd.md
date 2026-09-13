@@ -145,6 +145,6 @@ Course files a student uploads are stored in a separate bucket (`learnsprint-upl
 
 **The generated schedule.** FR3.1–FR3.3 produce time blocks, and those are computed on demand and returned — never written back. See [ADR 0005](adr/0005-schedule-not-persisted.md).
 
-**Synced Google Calendar events.** FR6.2 keeps no per-event bookkeeping: each sync replaces the whole LearnSprint-owned calendar with the freshly recomputed plan, so there are no Google event ids to store and nothing that could drift out of step with the schedule ([ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md)). Only the connection itself (`GoogleCalendarConnection`) is stored.
+**Synced Google Calendar events.** FR6.2 keeps no per-event bookkeeping: every event the app writes carries its course id as a private property, and each sync asks Google for that course's events, removes them, and writes the freshly recomputed plan — so there are no Google event ids to store and nothing that could drift out of step with the schedule ([ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md)). Only the connection itself (`GoogleCalendarConnection`) is stored.
 
 **Sprint state.** A sprint isn't a record either. It's derived: the week is computed from the current date, capacity from `UserConstraints`, and the commitment from whichever topics currently sit in `todo` / `in_progress`. Moving a card *is* changing the sprint, so there is nothing separate to keep in sync.

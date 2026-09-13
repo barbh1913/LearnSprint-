@@ -185,7 +185,7 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 2. System sends the Student to Google's consent screen — a separate consent from Google sign-in ([ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md)); the Student grants access.
 3. System stores the credential and creates a calendar named "LearnSprint" in the Student's Google account.
 4. Student chooses "Sync now" for a course.
-5. System recomputes the plan (UC7) and replaces the LearnSprint calendar's events with it.
+5. System recomputes the plan (UC7) and replaces that course's sessions in the LearnSprint calendar with it — other courses already synced there stay as they are.
 
 **Alternative flows:**
 - *Consent denied or cancelled* — nothing is stored; the Calendar shows "Not connected".
