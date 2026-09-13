@@ -16,6 +16,7 @@ from features.scheduling.application.generate_schedule import (
 )
 from features.scheduling.domain.calendar_export import plan_to_ics, schedule_to_ics
 from features.scheduling.domain.models import InfeasiblePlan, Schedule, SchedulingResult
+from features.scheduling.domain.topic_events import group_blocks_into_topic_events
 from features.scheduling.infrastructure.google_calendar import GoogleCalendarError
 from shared.auth.dependencies import get_current_user_id
 
@@ -37,10 +38,34 @@ class BlockOut(BaseModel):
     courseName: str | None = None
 
 
+class EventActionOut(BaseModel):
+    actionId: str
+    title: str
+    minutes: int
+
+
+class EventOut(BaseModel):
+    """A topic on the calendar: its consecutive scheduled subtasks as one entry (ADR 0012)."""
+
+    topicId: str | None
+    topicName: str | None
+    kind: str  # "study" | "review" | "study_aid"
+    start: str
+    end: str
+    durationMinutes: int
+    label: str
+    actions: list[EventActionOut]
+    courseId: str | None = None
+    courseName: str | None = None
+
+
 class ScheduleOut(BaseModel):
     feasible: bool
     isEmergencyMode: bool = False
+    # Per learning action - what the scheduler placed.
     blocks: list[BlockOut] = []
+    # Per topic - what the Calendar, the .ics and Google show.
+    events: list[EventOut] = []
     totalAvailableMinutes: int = 0
     totalNeededMinutes: int = 0
     # Only set when the plan doesn't fit.
@@ -58,10 +83,12 @@ class StudentPlanOut(BaseModel):
     """Every course's slice of the one combined plan (FR3.1), nearest exam first."""
 
     courses: list[CourseScheduleOut]
-    # All courses' sessions in time order - the all-courses calendar.
+    # All courses' blocks and topic events in time order - the all-courses calendar.
     blocks: list[BlockOut]
+    events: list[EventOut]
     totalAvailableMinutes: int
     totalNeededMinutes: int
+    # Number of topic events - what the student sees as "sessions".
     sessions: int
 
 
@@ -70,12 +97,14 @@ def get_student_plan(user_id: str = Depends(get_current_user_id)) -> StudentPlan
     plan = build_plan_for_student(user_id)
     courses = [_course_schedule_out(entry) for entry in plan.courses]
     blocks = sorted((block for course in courses for block in course.blocks), key=lambda b: b.start)
+    events = sorted((event for course in courses for event in course.events), key=lambda e: e.start)
     return StudentPlanOut(
         courses=courses,
         blocks=blocks,
+        events=events,
         totalAvailableMinutes=plan.total_available_minutes,
         totalNeededMinutes=sum(course.totalNeededMinutes for course in courses),
-        sessions=len(blocks),
+        sessions=len(events),
     )
 
 
@@ -164,6 +193,24 @@ def _schedule_out(result: SchedulingResult, *, course_id: str, course_name: str)
         isEmergencyMode=result.is_emergency_mode,
         totalAvailableMinutes=result.total_available_minutes,
         totalNeededMinutes=result.total_needed_minutes,
+        events=[
+            EventOut(
+                topicId=event.topic_id,
+                topicName=event.topic_name,
+                kind=event.kind,
+                start=event.start.isoformat(),
+                end=event.end.isoformat(),
+                durationMinutes=event.duration_minutes,
+                label=event.label,
+                actions=[
+                    EventActionOut(actionId=action.action_id, title=action.title, minutes=action.minutes)
+                    for action in event.actions
+                ],
+                courseId=course_id,
+                courseName=course_name,
+            )
+            for event in group_blocks_into_topic_events(result.blocks)
+        ],
         blocks=[
             BlockOut(
                 start=block.start.isoformat(),

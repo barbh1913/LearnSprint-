@@ -45,7 +45,7 @@ def test_several_courses_export_as_one_calendar_in_time_order() -> None:
 
     assert "X-WR-CALNAME:LearnSprint study plan" in ics
     assert ics.count("BEGIN:VEVENT") == 2
-    assert ics.index("SUMMARY:Read: Trees") < ics.index("SUMMARY:Read: Classes")
+    assert ics.index("SUMMARY:Study: Trees") < ics.index("SUMMARY:Study: Classes")
     assert "CATEGORIES:Data Structures" in ics
     assert "CATEGORIES:OOP" in ics
 
@@ -72,9 +72,10 @@ def test_event_carries_the_block_times() -> None:
 
 def test_commas_in_names_are_escaped() -> None:
     # An unescaped comma would split the field and corrupt the import.
-    ics = schedule_to_ics(make_schedule(make_block("Read: Trees, Graphs")), course_name="DS")
+    ics = schedule_to_ics(make_schedule(make_block()), course_name="Data Structures, Algorithms")
 
-    assert "Read: Trees\\, Graphs" in ics
+    assert "CATEGORIES:Data Structures\\, Algorithms" in ics
+    assert "X-WR-CALNAME:Data Structures\\, Algorithms study plan" in ics
 
 
 def test_uses_crlf_line_endings() -> None:

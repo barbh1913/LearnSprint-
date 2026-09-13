@@ -144,7 +144,10 @@ class TestCombinedPlan:
         assert [course["courseId"] for course in plan["courses"]] == [soon["id"], later["id"]]
         assert plan["courses"][0]["courseName"] == "Data Structures"
         assert plan["courses"][0]["examDate"].startswith(soon["examDate"][:10])
-        assert plan["sessions"] == len(plan["blocks"]) > 0
+        # A session is a topic event; several per-action blocks fold into one.
+        assert plan["sessions"] == len(plan["events"]) > 0
+        assert len(plan["events"]) < len(plan["blocks"])
+        assert all(event["courseName"] for event in plan["events"])
 
     def test_the_all_courses_blocks_are_merged_in_time_order_and_labelled(self) -> None:
         headers = auth_headers()
@@ -191,6 +194,7 @@ class TestCombinedPlan:
         assert plan == {
             "courses": [],
             "blocks": [],
+            "events": [],
             "totalAvailableMinutes": 0,
             "totalNeededMinutes": 0,
             "sessions": 0,
