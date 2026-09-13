@@ -10,7 +10,6 @@ The logical model first — this is what the application reasons about, independ
 erDiagram
     USER ||--o{ COURSE_MEMBERSHIP : "enrolled via"
     USER ||--|| USER_CONSTRAINTS : "defines"
-    USER ||--o| AI_SETTINGS : "configures"
     USER ||--o| GOOGLE_CALENDAR_CONNECTION : "connects"
     USER ||--o{ USER_TOPIC_PROGRESS : "rates"
     USER ||--o{ USER_ACTION_PROGRESS : "completes"
@@ -69,6 +68,8 @@ erDiagram
         string fileType
         int sizeBytes
         string uploadedAt
+        json analysis
+        string confirmedAt
     }
     USER_TOPIC_PROGRESS {
         string userId FK
@@ -87,11 +88,6 @@ erDiagram
         json blockedSlots
         string timePreference
     }
-    AI_SETTINGS {
-        string userId FK
-        bool aiEnabled
-        string apiKey
-    }
     GOOGLE_CALENDAR_CONNECTION {
         string userId FK
         string refreshToken
@@ -104,7 +100,7 @@ erDiagram
 
 ## Shared vs. private — the rule that shapes everything
 
-Course *content* is shared: a `Course`, its `Topic`s and their `LearningAction`s are one set of records that every enrolled student sees identically. Anything *personal* — the grade, the mastery rating, what's been completed, the blocked hours, the AI key, the Google Calendar credential — is stored per user.
+Course *content* is shared: a `Course`, its `Topic`s and their `LearningAction`s are one set of records that every enrolled student sees identically. Anything *personal* — the grade, the mastery rating, what's been completed, the blocked hours, uploaded materials, the Google Calendar credential — is stored per user.
 
 This is a structural guarantee, not a UI filter. There is no `finalGrade` column on `Course` that we remember to hide; the grade lives on the student's own `CourseMembership` record, so there is no query that could return another student's grade by accident. The same holds for mastery ratings and progress, which is what makes the Study Groups privacy requirement (FR5.4) true by construction.
 
@@ -120,7 +116,6 @@ DynamoDB has one table with a composite key (`PK`, `SK`) plus one global seconda
 |---|---|---|---|---|
 | User | `USER#<userId>` | `PROFILE` | `EMAIL#<email>` | `USER#<userId>` |
 | UserConstraints | `USER#<userId>` | `CONSTRAINTS` | — | — |
-| AiSettings | `USER#<userId>` | `AI_SETTINGS` | — | — |
 | GoogleCalendarConnection | `USER#<userId>` | `GOOGLE_CALENDAR` | — | — |
 | CourseMembership | `USER#<userId>` | `COURSE#<courseId>` | `COURSE#<courseId>` | `USER#<userId>` |
 | UserTopicProgress | `USER#<userId>` | `TPROG#<topicId>` | — | — |
@@ -159,7 +154,7 @@ Every query the application makes, and how the keys serve it:
 
 Course files a student uploads are stored in a separate bucket (`learnsprint-uploads-835505308330`, deployed - see [ADR 0009](adr/0009-split-into-per-feature-lambdas.md)), one object per file, keyed `{userId}/{courseId}/{uuid}-{filename}`. The prefix is the same private-per-user pattern as everything else here: a student's files sit under their own `userId`, structurally apart from anyone else's, the same way their `UserTopicProgress` rows do.
 
-Files uploaded for topic extraction (FR2.1) have no DynamoDB record — they are read once and their topics are what persists. Files attached to a topic (FR2.9) do: a `Material` row holds the S3 key, the owner and the topic, so the topic can list them and hand out short-lived download links. Objects never move; a material is deleted by removing both the row and the object.
+Files uploaded for batch topic extraction (FR2.1) have no DynamoDB record — they are read once and their topics are what persists. Files attached to a topic (FR2.9) or analysed one at a time (FR2.8, FR2.10) do: a `Material` row holds the S3 key, the owner and the topic, so the topic can list them and hand out short-lived download links. An analysed file starts with no `topicId` and carries its `analysis` (what the AI or the heuristic understood) until the student confirms where it belongs; a syllabus never gets a `topicId` at all — it produces topics rather than belonging to one — and records `confirmedAt` so a repeated confirmation is a no-op. Objects never move; a material is deleted by removing both the row and the object.
 
 ## What is *not* stored
 

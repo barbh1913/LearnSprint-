@@ -56,12 +56,12 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 **Main flow:**
 1. Student selects up to 15 PDF or PPTX files.
 2. System extracts the text from all of them and treats it as one corpus.
-3. System identifies the study topics — using Claude if the Student enabled AI analysis (UC5), otherwise a keyword heuristic.
+3. System identifies the study topics — using Claude when the backend's AI analysis is available (FR2.7), otherwise a keyword heuristic.
 4. System creates each topic with three learning actions: read, summarise, quiz.
 5. System reports how many topics were found, in which language, and the total estimated study time.
 
 **Alternative flows:**
-- *AI enabled but the call fails* — System silently falls back to the heuristic, creates the topics anyway, and tells the Student which analyser ran. An AI outage never costs the Student their upload.
+- *AI unavailable or the call fails* — System falls back to the heuristic, creates the topics anyway, and tells the Student which analyser ran. An AI outage never costs the Student their upload.
 - *Unsupported file type* — rejected (400) before anything is created.
 - *More than 15 files* — rejected (413).
 - *No topics found* — System reports it (422) and suggests adding topics by hand.
@@ -70,17 +70,26 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 
 ---
 
-## UC5 — Enable AI analysis
+## UC5 — Analyse one file into the right topic
 
-**Requirement:** FR2.7
+**Requirement:** FR2.7, FR2.8, FR2.9
+**Precondition:** the course exists (it may already have topics).
 **Main flow:**
-1. Student opens Profile and enters their own Anthropic API key.
-2. System verifies the key with a minimal request.
-3. System stores it against the Student's account and enables AI analysis.
+1. Student picks one PDF or PPTX on the course page and chooses "Analyse".
+2. System stores the file under the Student's own prefix and extracts its text.
+3. System works out what the file is about — a title, a summary, key points and an estimated study time — with Claude when the backend's AI is available, otherwise with the keyword heuristic.
+4. System's matcher compares that content with the course's existing topics and shows a decision dialog: the recommended topic (or "create a new topic"), a confidence, a plain-words reason, and up to two alternatives.
+5. Student chooses: attach to the recommended topic, attach to another topic, or create a new topic (editing the suggested title if they like).
+6. System files the material under the chosen topic — creating the topic with its three learning actions and the estimated time when asked to — and refreshes the topic's description from the summary and key points.
 
-**Alternative flow:** *Key rejected by Anthropic* — System reports it (422) and leaves AI disabled rather than storing a key that won't work.
+**Alternative flows:**
+- *No topic matches well* — the recommendation is "create a new topic" with the suggested title; the Student can still pick an existing topic.
+- *AI unavailable* — the heuristic's content is used and the dialog says so; the matcher runs exactly the same way.
+- *The chosen topic was deleted in the meantime* — System reports it (404) and the material stays unfiled for the Student to decide again.
+- *The Student confirms twice (a retry, a double click)* — the second confirmation returns the first result; no second topic, no second attachment.
+- *Unsupported or unreadable file* — rejected (400) before anything is analysed; a stored file is never lost because analysis failed.
 
-**Postcondition:** later uploads are analysed by Claude, which estimates real per-topic study time instead of using the fixed defaults. The key is never returned to the browser and never logged; the Student only ever sees its last four characters.
+**Postcondition:** the material is listed on its topic and the topic is part of the backlog and the plan like any other. Existing progress on that topic is untouched.
 
 ---
 
@@ -196,3 +205,24 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 - *Student disconnects* — System removes the LearnSprint calendar from Google (best effort) and discards the credential.
 
 **Postcondition:** the plan is visible in Google Calendar. The LearnSprint Calendar stays the source of truth, and syncing again never duplicates events.
+
+---
+
+## UC14 — Analyse a syllabus into lecture topics
+
+**Requirement:** FR2.7, FR2.10
+**Precondition:** the course exists.
+**Main flow:**
+1. Student picks the syllabus (PDF or PPTX) on the course page and chooses "Analyse syllabus".
+2. System stores the file and extracts its text.
+3. System proposes roughly one topic per lecture or week — each with a summary, key points and an estimated study time — with Claude when available, otherwise one proposal per heading found by the heuristic.
+4. System's matcher marks any proposal that already matches an existing topic of the course.
+5. Student reviews the list: renames proposals, drops some, and decides for a matched one whether to attach or create anyway.
+6. Student confirms; System creates the new topics (three learning actions and the estimated time each) and files nothing under the ones marked "attach" except a refreshed description.
+
+**Alternative flows:**
+- *The structure is unclear* — the proposals are conservative and few rather than invented; the Student can always add topics by hand (FR2.2).
+- *Confirming twice* — the second confirmation returns what the first created; no duplicate topics.
+- *Every proposal dropped* — nothing is created; the syllabus stays stored as course material.
+
+**Postcondition:** the course has a lecture-level backlog; the syllabus is kept as an uploaded material of the course.
