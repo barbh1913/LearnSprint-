@@ -34,6 +34,48 @@ describe('WeekGrid', () => {
     expect(screen.getByText('16')).toHaveClass('bg-primary')
   })
 
+  it('labels every visible hour, including the first', () => {
+    render(
+      <WeekGrid weekStart={weekStart} blocks={[]} range={range} today={today} onSelectBlock={vi.fn()} />,
+    )
+
+    expect(screen.getByText('15:00')).toBeInTheDocument()
+    expect(screen.getByText('22:00')).toBeInTheDocument()
+    expect(screen.queryByText('23:00')).not.toBeInTheDocument()
+  })
+
+  it('never lets a short session overrun the one after it', () => {
+    const sliver = block({
+      start: '2026-09-14T15:00:00',
+      end: '2026-09-14T15:10:00',
+      durationMinutes: 10,
+      label: 'Summarize: Trees',
+    })
+    const next = block({
+      start: '2026-09-14T15:10:00',
+      end: '2026-09-14T15:40:00',
+      durationMinutes: 30,
+      label: 'Quiz: Trees',
+    })
+    render(
+      <WeekGrid
+        weekStart={weekStart}
+        blocks={[next, sliver]}
+        range={range}
+        today={today}
+        onSelectBlock={vi.fn()}
+      />,
+    )
+
+    const first = screen.getByRole('button', { name: /Summarize: Trees/ })
+    const second = screen.getByRole('button', { name: /Quiz: Trees/ })
+    // 10 minutes is 8px; the 18px legibility minimum would cover the quiz that starts at 8px.
+    expect(first.style.top).toBe('0px')
+    expect(first.style.height).toBe('6px')
+    expect(second.style.top).toBe('8px')
+    expect(second.style.height).toBe('22px')
+  })
+
   it('places an event by its start time and length', () => {
     render(
       <WeekGrid

@@ -12,6 +12,10 @@ import {
 
 const HOUR_PX = 48
 const MIN_EVENT_PX = 18
+// A short session is stretched to MIN_EVENT_PX for legibility, but never into
+// the session after it - that one wins the space; the tooltip carries the rest.
+const EVENT_GAP_PX = 2
+const FLOOR_EVENT_PX = 4
 const GRID_COLUMNS = 'grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]'
 
 // Same colour language as the board and the old list: green for actions,
@@ -81,17 +85,19 @@ export function WeekGrid({
 
         <div className={cn('grid', GRID_COLUMNS)}>
           <div className="relative" style={{ height: columnHeight }}>
-            {hours.map((hour, index) =>
-              index === 0 ? null : (
-                <span
-                  key={hour}
-                  className="absolute right-2 -translate-y-1/2 text-[10px] text-muted-foreground"
-                  style={{ top: index * HOUR_PX }}
-                >
-                  {String(hour).padStart(2, '0')}:00
-                </span>
-              ),
-            )}
+            {hours.map((hour, index) => (
+              <span
+                key={hour}
+                className={cn(
+                  'absolute right-2 text-[10px] text-muted-foreground',
+                  // The first label sits under the header instead of straddling it.
+                  index > 0 && '-translate-y-1/2',
+                )}
+                style={{ top: index * HOUR_PX }}
+              >
+                {String(hour).padStart(2, '0')}:00
+              </span>
+            ))}
           </div>
 
           {days.map((day) => (
@@ -109,14 +115,7 @@ export function WeekGrid({
                 />
               ))}
 
-              {blocksOnDay(blocks, day).map((block, index) => {
-                const spot = placement(block, range)
-                if (!spot) return null
-
-                const style = {
-                  top: (spot.top / 60) * HOUR_PX,
-                  height: Math.max((spot.height / 60) * HOUR_PX - 2, MIN_EVENT_PX),
-                }
+              {layoutDay(blocksOnDay(blocks, day), range).map(({ block, spot, style }, index) => {
                 const timeRange = `${formatTime(block.start)}–${formatTime(block.end)}`
                 const className = cn(
                   'absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-1.5 py-0.5 text-left text-[11px] leading-tight',
@@ -160,4 +159,31 @@ export function WeekGrid({
       </div>
     </div>
   )
+}
+
+interface LaidOutBlock {
+  block: ScheduleBlock
+  spot: { top: number; height: number }
+  style: { top: number; height: number }
+}
+
+/** Pixel boxes for one day's blocks, earliest first, with no box overrunning the next. */
+function layoutDay(dayBlocks: ScheduleBlock[], range: HourRange): LaidOutBlock[] {
+  const placed = dayBlocks.flatMap((block) => {
+    const spot = placement(block, range)
+    return spot ? [{ block, spot }] : []
+  })
+
+  return placed.map(({ block, spot }, index) => {
+    const top = (spot.top / 60) * HOUR_PX
+    let height = Math.max((spot.height / 60) * HOUR_PX - EVENT_GAP_PX, MIN_EVENT_PX)
+
+    const next = placed[index + 1]
+    if (next) {
+      const nextTop = (next.spot.top / 60) * HOUR_PX
+      height = Math.min(height, Math.max(nextTop - top - EVENT_GAP_PX, FLOOR_EVENT_PX))
+    }
+
+    return { block, spot, style: { top, height } }
+  })
 }

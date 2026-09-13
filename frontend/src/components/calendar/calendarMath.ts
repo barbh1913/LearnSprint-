@@ -14,7 +14,8 @@ export interface HourRange {
   endHour: number
 }
 
-export const DEFAULT_HOUR_RANGE: HourRange = { startHour: 8, endHour: 20 }
+/** The study day the grid always shows, so weeks look alike whether or not they are busy. */
+export const DEFAULT_HOUR_RANGE: HourRange = { startHour: 8, endHour: 23 }
 
 const MINUTES_PER_DAY = 24 * 60
 
@@ -64,18 +65,19 @@ function endMinutesIntoDay(block: ScheduleBlock): number {
   return end === 0 ? MINUTES_PER_DAY : end
 }
 
-/** The tightest whole-hour range around the blocks, so the grid doesn't spend space on 03:00. */
+/** The full study day, widened only if a session falls outside it - never narrowed, never hiding one. */
 export function hourRange(
   blocks: ScheduleBlock[],
-  fallback: HourRange = DEFAULT_HOUR_RANGE,
+  base: HourRange = DEFAULT_HOUR_RANGE,
 ): HourRange {
-  if (blocks.length === 0) return fallback
+  if (blocks.length === 0) return base
 
-  const startHour = Math.min(
-    ...blocks.map((block) => Math.floor(minutesIntoDay(block.start) / 60)),
-  )
-  const endHour = Math.max(...blocks.map((block) => Math.ceil(endMinutesIntoDay(block) / 60)))
-  return { startHour, endHour: Math.max(endHour, startHour + 1) }
+  const earliest = Math.min(...blocks.map((block) => Math.floor(minutesIntoDay(block.start) / 60)))
+  const latest = Math.max(...blocks.map((block) => Math.ceil(endMinutesIntoDay(block) / 60)))
+  return {
+    startHour: Math.min(base.startHour, earliest),
+    endHour: Math.max(base.endHour, latest),
+  }
 }
 
 /** Where a block sits in its day column, in minutes from the top of the visible range. Null if fully outside it. */

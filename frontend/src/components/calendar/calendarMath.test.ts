@@ -62,17 +62,23 @@ describe('blocksOnDay', () => {
 })
 
 describe('hourRange', () => {
-  it('falls back when there is nothing to show', () => {
-    expect(hourRange([])).toEqual({ startHour: 8, endHour: 20 })
+  it('shows the whole study day when there is nothing to show', () => {
+    expect(hourRange([])).toEqual({ startHour: 8, endHour: 23 })
   })
 
-  it('wraps the blocks in whole hours', () => {
+  it('keeps the whole study day even when the sessions only use the evening', () => {
     const range = hourRange([
       block('2026-09-14T15:30:00', '2026-09-14T16:15:00'),
       block('2026-09-15T21:00:00', '2026-09-15T22:45:00'),
     ])
 
-    expect(range).toEqual({ startHour: 15, endHour: 23 })
+    expect(range).toEqual({ startHour: 8, endHour: 23 })
+  })
+
+  it('widens for an early-morning session rather than hiding it', () => {
+    const range = hourRange([block('2026-09-14T06:00:00', '2026-09-14T07:30:00')])
+
+    expect(range).toEqual({ startHour: 6, endHour: 23 })
   })
 
   it('treats a block ending at midnight as ending at 24:00', () => {
