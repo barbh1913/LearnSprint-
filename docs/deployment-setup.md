@@ -1,6 +1,6 @@
 # Deployment
 
-**Status: live**, and the frontend now redeploys automatically on push once the GitHub secrets below are set. See [ADR 0008](adr/0008-deployed-to-aws.md) for the initial deployment and [ADR 0009](adr/0009-split-into-per-feature-lambdas.md) for splitting it into six per-feature Lambdas with per-student S3 storage for uploads.
+**Status: live**, and both the frontend and the six backend Lambdas now redeploy automatically on push once the GitHub secrets below are set. See [ADR 0008](adr/0008-deployed-to-aws.md) for the initial deployment and [ADR 0009](adr/0009-split-into-per-feature-lambdas.md) for splitting it into six per-feature Lambdas with per-student S3 storage for uploads.
 
 | | |
 |---|---|
@@ -17,7 +17,7 @@
 
 ## One remaining step: add the GitHub secrets
 
-The AWS side (role, permissions) is done. `deploy-frontend.yml` now triggers on every push to `main` touching `frontend/`, but it **will fail until these secrets exist** — it fails fast with a clear message rather than shipping a broken build, so this is a visible red X, not a silent problem. Add them under **Settings → Secrets and variables → Actions → New repository secret**:
+The AWS side (role, permissions) is done. `deploy-frontend.yml` triggers on every push to `main` touching `frontend/`, and `deploy-backend.yml` on every push touching `backend/` — both **will fail until these secrets exist** (the frontend one fails fast with a clear message rather than shipping a broken build; the backend one just can't assume the role). Add them under **Settings → Secrets and variables → Actions → New repository secret**:
 
 | Secret | Value |
 |---|---|
@@ -37,11 +37,13 @@ The `VITE_COGNITO_*` and `VITE_REDIRECT_URI` values are public identifiers, not 
 ```
 "token.actions.githubusercontent.com:sub": "repo:barbh1913/LearnSprint-:*"
 ```
-It was created fresh rather than reusing the account's other GitHub Actions role (`githubactions-s3-fullaccess`), which is scoped to two unrelated repositories from other coursework — widening someone else's shared role to a third project isn't something to do without asking. Its permissions are equally narrow: `s3:PutObject` / `DeleteObject` / `ListBucket` on `learnsprint-frontend-835505308330` alone, and `cloudfront:CreateInvalidation` on `E2GSBED87C32YJ` alone — nothing else in the account.
+It was created fresh rather than reusing the account's other GitHub Actions role (`githubactions-s3-fullaccess`), which is scoped to two unrelated repositories from other coursework — widening someone else's shared role to a third project isn't something to do without asking. Its permissions are two separate inline policies, each as narrow as the job it's for:
+- `deploy-frontend`: `s3:PutObject` / `DeleteObject` / `ListBucket` on `learnsprint-frontend-835505308330` alone, and `cloudfront:CreateInvalidation` on `E2GSBED87C32YJ` alone.
+- `deploy-backend-lambdas`: `lambda:UpdateFunctionCode` / `GetFunction` / `GetFunctionConfiguration`, scoped to exactly the six function ARNs above and nothing else in the account.
 
 ## Redeploying by hand
 
-`deploy-frontend.yml` covers the frontend once its secrets are set. The backend has no workflow yet — every backend deploy is still this, run from `backend/`. All six functions share one deployment package, so build it once:
+`deploy-frontend.yml` and `deploy-backend.yml` cover both halves once the secrets are set - this section is for when a manual deploy is faster than waiting on CI, or for debugging a failed run. Run from `backend/`. All six functions share one deployment package, so build it once:
 
 **A brand new endpoint also needs a new API Gateway route** — the exact-route strategy (ADR 0009) means `update-function-code` alone isn't enough; a route that doesn't exist yet 404s no matter what the Lambda code does:
 ```
@@ -83,9 +85,8 @@ Only `index.html` needs invalidating — every other asset is content-hashed, so
 |---|---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | every push and PR | Backend pytest, frontend typecheck + lint + tests. Needs no AWS access — the tests use an in-memory fake for DynamoDB. |
 | [`deploy-frontend.yml`](../.github/workflows/deploy-frontend.yml) | push to `main` touching `frontend/`, or manual | Builds the SPA and syncs it to S3, then invalidates CloudFront. Needs the secrets above to actually succeed. |
+| [`deploy-backend.yml`](../.github/workflows/deploy-backend.yml) | push to `main` touching `backend/`, or manual | Runs `pytest` as a gate, packages the shared deployment zip, then updates all six Lambda functions and waits for each to finish. Redeploys all six every time rather than tracking which feature(s) changed - simpler, and a `shared/` change needs all six anyway. |
 
 ## Known gaps
-
-**No `deploy-backend.yml`.** Backend deploys stay manual (above) until one exists to run the packaging + per-function `update-function-code` steps in CI.
 
 **No custom domain.** The previous project's domain (`study-planner.proj.rotem.click`) doesn't resolve — its Route 53 zone exists in this account but the parent zone doesn't, so there's no delegation (ADR 0008). The app runs on CloudFront's own domain instead.

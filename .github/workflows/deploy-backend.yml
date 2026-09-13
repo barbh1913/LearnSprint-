@@ -1,0 +1,85 @@
+name: Deploy backend to Lambda
+
+# Packages the six per-feature Lambdas (ADR 0009) into one shared deployment
+# zip and updates all six functions. Redeploying all six on every backend
+# change is simpler and safer than tracking which feature(s) actually
+# touched shared/ - see docs/deployment-setup.md.
+#
+# Runs automatically once the repo secrets in docs/deployment-setup.md are set
+# (learnsprint-github-actions is the scoped IAM role this assumes - ADR 0008,
+# widened with a `deploy-backend-lambdas` policy scoped to just these six
+# function ARNs, nothing else in the account).
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', '.github/workflows/deploy-backend.yml']
+  workflow_dispatch:
+
+permissions:
+  id-token: write # required for the OIDC token exchange with AWS
+  contents: read
+
+env:
+  FUNCTIONS: >-
+    learnsprint-auth
+    learnsprint-academic-profile
+    learnsprint-content-topics
+    learnsprint-scheduling
+    learnsprint-progress
+    learnsprint-study-groups
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      # A broken backend must never reach Lambda - build and package only
+      # after the same suite CI already runs on this commit passes here too.
+      - name: Install dev dependencies and run tests
+        working-directory: backend
+        run: |
+          pip install -e ".[dev]"
+          pytest -q
+
+      # Wheels built for the Lambda runtime (manylinux2014, cp313), not
+      # whatever the runner itself happens to be - see docs/deployment-setup.md.
+      # Do NOT strip *.dist-info: email-validator needs it at runtime (ADR 0008).
+      - name: Build the shared deployment package
+        working-directory: backend
+        run: |
+          rm -rf build/lambda-package build/lambda-deploy.zip
+          pip install --platform manylinux2014_x86_64 --python-version 3.13 \
+            --implementation cp --abi cp313 --only-binary=:all: \
+            --target build/lambda-package ".[lambda]"
+          cp src/main.py src/lambda_handler.py build/lambda-package/
+          find build/lambda-package -name "__pycache__" -type d -exec rm -rf {} +
+          cd build/lambda-package && zip -r -q ../lambda-deploy.zip .
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: il-central-1
+
+      - name: Update all six Lambda functions
+        working-directory: backend
+        run: |
+          for function in $FUNCTIONS; do
+            echo "Updating $function"
+            aws lambda update-function-code \
+              --function-name "$function" \
+              --zip-file fileb://build/lambda-deploy.zip \
+              --query LastUpdateStatus --output text
+          done
+          for function in $FUNCTIONS; do
+            aws lambda wait function-updated --function-name "$function"
+          done
