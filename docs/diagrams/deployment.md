@@ -11,7 +11,7 @@
 | API Gateway `smart-study-planner-api` | **Live** — reused from a previous project; 31 exact routes added for this app, its original three routes untouched |
 | S3 `learnsprint-frontend-835505308330` + CloudFront | **Live** |
 | S3 `learnsprint-uploads-835505308330` | **Live** — one key per uploaded file, under `{userId}/{courseId}/...` |
-| Cognito user pool | **Live** — reused as-is, see [ADR 0007](../adr/0007-google-sign-in-via-cognito.md) |
+| Cognito user pool | **Live** — holds every account, password and Google alike, see [ADR 0007](../adr/0007-google-sign-in-via-cognito.md) and [ADR 0014](../adr/0014-cognito-as-the-single-identity-provider.md) |
 
 | Function | Owns | Routes |
 |---|---|---|
@@ -49,6 +49,7 @@ flowchart TB
     Lambdas --> DDB
     LTopics --> S3U
     Browser -.->|Google sign-in, PKCE| Cognito
+    LAuth -.->|password sign-up, login, reset, delete| Cognito
     Lambdas -.->|verify id_token via JWKS| Cognito
 ```
 
@@ -60,7 +61,7 @@ API Gateway matches each of the 31 routes by its exact literal path, so `GET /co
 
 **No RDS**, so there is no VPC, no subnet groups, and no Lambda connection-pooling problem — the question [ADR 0002](../adr/0002-serverless-lambda-over-containers.md) left open was dissolved rather than answered when persistence moved to DynamoDB ([ADR 0006](../adr/0006-dynamodb-single-table.md)).
 
-**Auth is the app's own JWT plus Google through the existing Cognito user pool** ([ADR 0007](../adr/0007-google-sign-in-via-cognito.md)). No API Gateway route has an authorizer attached — the pool's existing JWT authorizer validates Cognito tokens only, and attaching it would have silently locked out every user who signed up with a password instead of Google. Every function validates both token types itself, the same way the app does locally.
+**Auth is Cognito for every credential, with the app's own session JWT on top** ([ADR 0007](../adr/0007-google-sign-in-via-cognito.md), [ADR 0014](../adr/0014-cognito-as-the-single-identity-provider.md)): the `auth` Lambda calls the pool for password sign-up, login, reset and deletion; Google goes through the hosted UI. No API Gateway route has an authorizer attached — the pool's existing JWT authorizer validates Cognito tokens only, and attaching it would have silently locked out every user who signed up with a password instead of Google. Every function validates both token types itself, the same way the app does locally.
 
 **A narrower execution role for the six functions** (`learnsprint-lambda-role`, ADR 0009) than the reused `lambda_fullAccess` from ADR 0008 — scoped to exactly the `LearnSprint` table and the uploads bucket, not every table in the account. The old role stays exactly as it was, attached only to the three original Lambdas from the previous project.
 

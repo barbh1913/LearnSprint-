@@ -7,12 +7,13 @@
 | Frontend | `https://d6dbklbpa5amn.cloudfront.net` |
 | API | `https://j6ltiaailc.execute-api.il-central-1.amazonaws.com/prod` |
 | Lambdas | `learnsprint-auth`, `-academic-profile`, `-content-topics`, `-scheduling`, `-progress`, `-study-groups` (il-central-1) — one per feature, see ADR 0009 |
-| Lambda execution role | `learnsprint-lambda-role` — scoped to the `LearnSprint` table and the uploads bucket only |
+| Lambda execution role | `learnsprint-lambda-role` — scoped to the `LearnSprint` table, the uploads bucket, and the Cognito user pool's admin user operations (see below) |
+| Cognito user pool | `il-central-1_tahdnpizi` (app client `4gbs8nrr3jqn54iqjd6r3an6hd`) — every account, password and Google alike, see [ADR 0014](adr/0014-cognito-as-the-single-identity-provider.md) |
 | DynamoDB | `LearnSprint` table |
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
 | S3 (uploads) | `learnsprint-uploads-835505308330` — one key per file, under `{userId}/{courseId}/...` |
 | CloudFront | `E2GSBED87C32YJ` |
-| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint, plus the ones added since (7 for the Calendar and Google sync, 6 for subtasks and materials, 4 for AI content analysis — see below; the 2 `/ai-settings` routes are obsolete) |
+| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint, plus the ones added since (7 for the Calendar and Google sync, 6 for subtasks and materials, 4 for AI content analysis, 4 for account management — see below; the 2 `/ai-settings` routes are obsolete) |
 | CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
 ## One remaining step: add the GitHub secrets
@@ -137,6 +138,45 @@ GET    /courses/{course_id}/topics/{topic_id}/materials
 GET    /courses/{course_id}/topics/{topic_id}/materials/{material_id}/download
 DELETE /courses/{course_id}/topics/{topic_id}/materials/{material_id}
 ```
+
+## Cognito as the single identity provider (ADR 0014) — one-time manual setup
+
+Password accounts now live in the user pool too, so the pool is required for every sign-in, not only Google. Three things to set by hand; `deploy-backend.yml` ships the code as usual.
+
+**1. App client** `4gbs8nrr3jqn54iqjd6r3an6hd` — enable the `ALLOW_USER_PASSWORD_AUTH` flow (login and the current-password check call `InitiateAuth` with it), keeping the flows it already has:
+```
+aws cognito-idp update-user-pool-client --user-pool-id il-central-1_tahdnpizi --client-id 4gbs8nrr3jqn54iqjd6r3an6hd --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
+```
+(`--explicit-auth-flows` replaces the list — check `aws cognito-idp describe-user-pool-client` first and include whatever is already enabled.) The client must have **no client secret**; the hosted-UI client used for Google already has none.
+
+**2. Lambda role** `learnsprint-lambda-role` — an inline policy on the pool, for the admin calls the adapter makes (`learnsprint-auth` is the only function that calls them, but all six share the role):
+```
+{
+  "Effect": "Allow",
+  "Action": [
+    "cognito-idp:AdminCreateUser",
+    "cognito-idp:AdminSetUserPassword",
+    "cognito-idp:AdminDeleteUser",
+    "cognito-idp:ListUsers"
+  ],
+  "Resource": "arn:aws:cognito-idp:il-central-1:835505308330:userpool/il-central-1_tahdnpizi"
+}
+```
+`InitiateAuth`, `ForgotPassword` and `ConfirmForgotPassword` are unauthenticated client calls and need no IAM permission.
+
+**3. Environment** — `learnsprint-auth` must have `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` and `COGNITO_REGION` (the other five functions already need the first two to verify Google tokens; check with `aws lambda get-function-configuration --function-name learnsprint-auth --query Environment`). Without them every `/auth` endpoint answers 503.
+
+**Reset-code emails** are sent by the pool itself. The default Cognito sender (50 emails/day) is enough at this scale; the pool's *Messaging* tab is where to switch to SES if it ever isn't. The pool's password policy applies on top of the app's 8-character minimum — its message is shown to the student as-is.
+
+**Routes** — four new exact routes on the `learnsprint-auth` integration (copy its id from `POST /auth/login`):
+```
+POST   /auth/forgot-password
+POST   /auth/reset-password
+POST   /auth/change-password
+DELETE /auth/me
+```
+
+**Existing password accounts** created before this change have to register again with the same email: their profile and data are kept (matched by email), but Cognito never saw their password and bcrypt hashes cannot be imported. The old `passwordHash` attribute on `USER` rows is simply ignored and can be left in place.
 
 ## Workflows
 
