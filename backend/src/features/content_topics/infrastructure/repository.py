@@ -165,11 +165,13 @@ def create_material(
     *,
     user_id: str,
     course_id: str,
-    topic_id: str,
+    topic_id: str | None,
     file_name: str,
     s3_key: str,
     size_bytes: int,
+    analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """A stored file. `topic_id` is None while an analysed file waits for the student's decision."""
     material_id = str(uuid.uuid4())
     item = {
         "PK": dynamo.course_pk(course_id),
@@ -184,6 +186,7 @@ def create_material(
         "fileType": _file_type(file_name),
         "sizeBytes": size_bytes,
         "uploadedAt": datetime.now().isoformat(timespec="seconds"),
+        "analysis": analysis,
     }
     dynamo.put_item(item)
     return item
@@ -191,6 +194,15 @@ def create_material(
 
 def get_material(course_id: str, material_id: str) -> dict[str, Any] | None:
     return dynamo.get_item(dynamo.course_pk(course_id), f"{MATERIAL_PREFIX}{material_id}")
+
+
+def update_material(course_id: str, material_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
+    material = get_material(course_id, material_id)
+    if material is None:
+        return None
+    material.update(changes)
+    dynamo.put_item(material)
+    return material
 
 
 def list_topic_materials(course_id: str, topic_id: str) -> list[dict[str, Any]]:
