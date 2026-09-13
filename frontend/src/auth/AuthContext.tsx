@@ -19,6 +19,8 @@ interface AuthState {
   /** Adopt a token issued elsewhere - the Cognito id_token after Google sign-in. */
   loginWithToken: (token: string) => Promise<void>
   logout: () => void
+  /** Delete the account on the server, then end the session the same way logout does. */
+  deleteAccount: (confirm: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -73,8 +75,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const deleteAccount = useCallback(
+    async (confirm: string) => {
+      await api.deleteAccount(confirm)
+      logout()
+    },
+    [logout],
+  )
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, loginWithToken, logout }}>
+    <AuthContext.Provider
+      value={{ user, isLoading, login, register, loginWithToken, logout, deleteAccount }}
+    >
       {children}
     </AuthContext.Provider>
   )

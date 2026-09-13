@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
+import { AccountSettings } from '../components/AccountSettings'
 import type { BlockedSlot, UserConstraints } from '../types'
 import {
   Button,
@@ -18,7 +18,6 @@ const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
 
 /** Time constraints (FR1.1) - these are what the scheduler plans around. */
 export function ProfilePage() {
-  const { user } = useAuth()
   const [constraints, setConstraints] = useState<UserConstraints | null>(null)
   const [error, setError] = useState('')
   const [savedNote, setSavedNote] = useState('')
@@ -90,10 +89,7 @@ export function ProfilePage() {
 
       {error && <ErrorNote message={error} />}
 
-      <Card className="mb-4">
-        <h2 className="mb-3 font-medium">Account</h2>
-        <p className="text-sm text-muted-foreground">{user?.email}</p>
-      </Card>
+      <AccountSettings />
 
       <Card className="mb-4">
         <h2 className="mb-3 font-medium">When do you study best?</h2>
