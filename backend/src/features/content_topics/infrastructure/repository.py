@@ -205,11 +205,15 @@ def update_material(course_id: str, material_id: str, changes: dict[str, Any]) -
     return material
 
 
+def list_course_materials(course_id: str) -> list[dict[str, Any]]:
+    """Every material in the course, filed or still pending, whoever uploaded it."""
+    return dynamo.query_prefix(dynamo.course_pk(course_id), MATERIAL_PREFIX)
+
+
 def list_topic_materials(course_id: str, topic_id: str) -> list[dict[str, Any]]:
     """Every material on the topic, whoever uploaded it - callers filter by owner."""
-    items = dynamo.query_prefix(dynamo.course_pk(course_id), MATERIAL_PREFIX)
     return sorted(
-        (item for item in items if item.get("topicId") == topic_id),
+        (item for item in list_course_materials(course_id) if item.get("topicId") == topic_id),
         key=lambda item: (item.get("uploadedAt", ""), item.get("fileName", "").lower()),
     )
 

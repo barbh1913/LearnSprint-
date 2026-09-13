@@ -168,6 +168,26 @@ export const api = {
 
   me: () => request<User>('/auth/me'),
 
+  /** Always succeeds from the caller's point of view - the server never says whether the email exists. */
+  forgotPassword: (email: string) =>
+    request<void>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+
+  resetPassword: (email: string, code: string, newPassword: string) =>
+    request<void>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, newPassword }),
+    }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
+  /** Removes the LearnSprint data and the Cognito user; the caller must type DELETE. */
+  deleteAccount: (confirm: string) =>
+    request<void>('/auth/me', { method: 'DELETE', body: JSON.stringify({ confirm }) }),
+
   listCourses: () => request<Course[]>('/courses'),
 
   getCourse: (courseId: string) => request<Course>(`/courses/${courseId}`),

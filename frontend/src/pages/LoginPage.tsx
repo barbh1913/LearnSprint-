@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import { Zap } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { cognitoConfigured, redirectToGoogleSignIn } from '../auth/cognito'
@@ -7,6 +7,9 @@ import { Button, ErrorNote, Field, Input } from '../components/ui/primitives'
 
 export function LoginPage() {
   const { user, login, register } = useAuth()
+  const location = useLocation()
+  // A one-line message another page sent us here with - e.g. after a password reset.
+  const notice = (location.state as { notice?: string } | null)?.notice
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -43,6 +46,12 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-border bg-card p-6">
+          {notice && (
+            <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+              {notice}
+            </p>
+          )}
+
           {cognitoConfigured && (
             <>
               <Button
@@ -88,6 +97,14 @@ export function LoginPage() {
           <Button type="submit" variant="primary" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? 'Please wait' : mode === 'login' ? 'Sign in' : 'Create account'}
           </Button>
+
+          {mode === 'login' && (
+            <p className="text-center text-sm">
+              <Link to="/forgot-password" className="text-muted-foreground hover:underline">
+                Forgot password?
+              </Link>
+            </p>
+          )}
 
           <p className="text-center text-sm text-muted-foreground">
             {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}

@@ -1,5 +1,7 @@
 # 0007 — Google sign-in through Cognito, alongside the local login
 
+> Partly superseded by [ADR 0014](0014-cognito-as-the-single-identity-provider.md): the local bcrypt login described below has since moved into the same Cognito user pool. The Google flow, the `_resolve_user` seam and the one-account-per-email rule are unchanged.
+
 ## Context
 
 The AWS account already had a Cognito user pool with Google configured as an identity provider, left from a previous project, and `http://localhost:5173/callback` was already among its allowed callback URLs. Bar asked for Google sign-in through it.

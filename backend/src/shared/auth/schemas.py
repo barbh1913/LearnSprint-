@@ -1,12 +1,13 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+# The frontend states the same minimum; Cognito's own policy applies on top and
+# its message is passed through when it rejects a password.
+MIN_PASSWORD_LENGTH = 8
+
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    # Matches the frontend's own stated policy (LoginPage.tsx) - enforced here
-    # too, since the client-side minLength is trivially bypassed by anyone
-    # calling the API directly.
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH)
 
 
 class LoginRequest(BaseModel):
@@ -24,3 +25,23 @@ class UserOut(BaseModel):
 
     id: str
     email: EmailStr
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=1, max_length=20)
+    newPassword: str = Field(min_length=MIN_PASSWORD_LENGTH)
+
+
+class ChangePasswordRequest(BaseModel):
+    currentPassword: str
+    newPassword: str = Field(min_length=MIN_PASSWORD_LENGTH)
+
+
+class DeleteAccountRequest(BaseModel):
+    # The student types the word, so a stray click can never delete an account.
+    confirm: str

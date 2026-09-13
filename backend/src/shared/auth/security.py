@@ -1,19 +1,10 @@
+"""The app's own session token, issued once Cognito has vouched for the person (ADR 0014)."""
+
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from shared.config import settings
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-
-def verify_password(password: str, password_hash: str) -> bool:
-    return pwd_context.verify(password, password_hash)
 
 
 def create_access_token(subject: str) -> str:

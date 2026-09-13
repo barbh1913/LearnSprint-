@@ -11,7 +11,7 @@ Upload your course material and LearnSprint works out the topics and how long ea
 | Document | What's in it |
 |---|---|
 | [CLAUDE.md](CLAUDE.md) | Full specification — product thesis, functional requirements, data dictionary, edge cases |
-| [docs/use-cases.md](docs/use-cases.md) | Use cases UC1–UC12 |
+| [docs/use-cases.md](docs/use-cases.md) | Use cases UC1–UC14 |
 | [docs/erd.md](docs/erd.md) | Data model (DynamoDB single-table design) |
 | [docs/adr/](docs/adr/) | Architecture decisions and the reasoning behind them |
 | [docs/diagrams/](docs/diagrams/) | System architecture, request flow, algorithm sequence |
@@ -52,15 +52,15 @@ uvicorn main:app --app-dir src --reload --port 8000
 
 Backend runs at `http://localhost:8000` — `/health` for a liveness check, `/docs` for the interactive API documentation.
 
-Environment variables (all optional, defaults shown):
+Environment variables (defaults shown; the Cognito pair is needed for any sign-in):
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `DYNAMO_TABLE` | `LearnSprint` | Table name |
 | `AWS_REGION` | `il-central-1` | Region the table lives in |
-| `JWT_SECRET` | `dev-secret-change-me` | Signs auth tokens — **set a real value outside local development** |
-| `COGNITO_USER_POOL_ID` | *(empty)* | Enables Google sign-in — see step 4 |
-| `COGNITO_CLIENT_ID` | *(empty)* | Enables Google sign-in — see step 4 |
+| `JWT_SECRET` | `dev-secret-change-me` | Signs session tokens — **set a real value outside local development** |
+| `COGNITO_USER_POOL_ID` | *(empty)* | The user pool that holds every account — see step 4 |
+| `COGNITO_CLIENT_ID` | *(empty)* | Its app client (no secret, `ALLOW_USER_PASSWORD_AUTH` enabled) — see step 4 |
 | `COGNITO_REGION` | `il-central-1` | Region of the user pool |
 
 Run the tests: `pytest` (from `backend/`). They run against an in-memory stand-in for DynamoDB, so they work offline and leave nothing behind in AWS.
@@ -77,11 +77,11 @@ Frontend runs at `http://localhost:5173` and proxies `/api/*` to the backend (se
 
 Run the tests: `npm run test` (from `frontend/`).
 
-## 4. Optional: Google sign-in
+## 4. Sign-in: the Cognito user pool
 
-The login page shows **Continue with Google** when Cognito is configured. Copy `frontend/.env.example` to `frontend/.env.local` and fill in the pool's hosted-UI domain, app client id and callback URL; give the backend the pool id and client id in `backend/.env` (see `backend/.env.example`). Restart both servers — they read these at startup.
+Every account lives in one AWS Cognito user pool — email/password and Google alike ([ADR 0014](docs/adr/0014-cognito-as-the-single-identity-provider.md)). The backend needs the pool id and app client id in `backend/.env` (see `backend/.env.example`); with them, registration, sign-in, *Forgot password*, *Change password* and *Delete account* all work. Your AWS credentials (`aws configure`) must be allowed the pool's admin user operations — `docs/deployment-setup.md` lists them.
 
-The user pool needs Google as an identity provider and `http://localhost:5173/callback` as an allowed callback URL. Without any of this the button is simply hidden and email/password works as before. How the two logins share one account is in [ADR 0007](docs/adr/0007-google-sign-in-via-cognito.md).
+**Continue with Google** appears when the frontend is configured too: copy `frontend/.env.example` to `frontend/.env.local` and fill in the pool's hosted-UI domain, app client id and callback URL; the pool needs Google as an identity provider and `http://localhost:5173/callback` as an allowed callback URL. Without the frontend values the button is simply hidden. How the two sign-ins share one account is in [ADR 0007](docs/adr/0007-google-sign-in-via-cognito.md). Restart both servers after changing any of this — they read it at startup.
 
 ## 5. Optional: enable AI analysis
 
