@@ -119,30 +119,6 @@ def get_constraints(user_id: str) -> dict[str, Any]:
     }
 
 
-def get_ai_settings(user_id: str) -> dict[str, Any]:
-    """AI settings including the raw key. Never return this straight to the frontend."""
-    stored = dynamo.get_item(dynamo.user_pk(user_id), "AI_SETTINGS")
-    return stored or {"userId": user_id, "aiEnabled": False, "apiKey": None}
-
-
-def save_ai_settings(user_id: str, *, enabled: bool, api_key: str | None) -> dict[str, Any]:
-    """Store the student's own API key.
-
-    DynamoDB encrypts at rest, and the key is only ever read server-side when
-    analysing an upload - it is never sent back over the API (see the router).
-    """
-    item = {
-        "PK": dynamo.user_pk(user_id),
-        "SK": "AI_SETTINGS",
-        "entity": "UserAiSettings",
-        "userId": user_id,
-        "aiEnabled": enabled,
-        "apiKey": api_key,
-    }
-    dynamo.put_item(item)
-    return item
-
-
 def save_constraints(user_id: str, blocked_slots: list[dict[str, Any]], preference: str) -> dict[str, Any]:
     item = {
         "PK": dynamo.user_pk(user_id),

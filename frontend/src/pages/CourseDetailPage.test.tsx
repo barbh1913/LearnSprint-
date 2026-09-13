@@ -33,12 +33,42 @@ function topicCard() {
   }
 }
 
+const materialAnalysis = {
+  materialId: 'm1',
+  fileName: 'lecture5.pdf',
+  analysedBy: 'heuristic',
+  note: null,
+  content: { title: 'Heaps', summary: null, keyPoints: ['Heapify'], topics: ['Heaps'], estimatedMinutes: null, language: 'en' },
+  recommendation: {
+    decision: 'attach_existing',
+    topicId: 't1',
+    topicName: 'Heaps',
+    confidence: 0.9,
+    reason: "The material names 'Heaps' outright",
+    suggestedTitle: 'Heaps',
+    alternatives: [],
+  },
+}
+
 function mockApi({ onPatch, onDelete }: { onPatch?: () => void; onDelete?: () => void } = {}) {
+  const posts: string[] = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, options: RequestInit = {}) => {
       if (url.includes('/members')) {
         return { ok: true, status: 200, json: async () => [] }
+      }
+      if (url.includes('/materials/analyze')) {
+        posts.push(url)
+        return { ok: true, status: 201, json: async () => materialAnalysis }
+      }
+      if (url.includes('/materials/m1/confirm')) {
+        posts.push(url)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ materialId: 'm1', topicId: 't1', topicName: 'Heaps', created: false, alreadyConfirmed: false }),
+        }
       }
       if (options.method === 'DELETE') {
         onDelete?.()
@@ -64,6 +94,7 @@ function mockApi({ onPatch, onDelete }: { onPatch?: () => void; onDelete?: () =>
       return { ok: true, status: 200, json: async () => ({}) }
     }),
   )
+  return posts
 }
 
 function renderPage() {
@@ -113,6 +144,24 @@ describe('CourseDetailPage', () => {
     fireEvent.click(await screen.findByLabelText('Delete Heaps'))
 
     await waitFor(() => expect(deleted).toBe(true))
+  })
+
+  it('analyses one file, shows the decision dialog, and files it where the student chooses', async () => {
+    const posts = mockApi()
+    renderPage()
+    await screen.findByDisplayValue('Heaps')
+
+    const file = new File(['%PDF'], 'lecture5.pdf', { type: 'application/pdf' })
+    fireEvent.change(screen.getByLabelText('Analyse one file'), { target: { files: [file] } })
+
+    expect(await screen.findByText('Material analysed')).toBeInTheDocument()
+    expect(posts.some((url) => url.endsWith('/courses/c1/materials/analyze'))).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attach to Heaps' }))
+
+    expect(await screen.findByText('Filed lecture5.pdf under "Heaps".')).toBeInTheDocument()
+    expect(posts.some((url) => url.endsWith('/materials/m1/confirm'))).toBe(true)
+    expect(screen.queryByText('Material analysed')).not.toBeInTheDocument()
   })
 
   it('shows an error instead of failing silently when a rename is rejected', async () => {

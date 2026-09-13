@@ -66,17 +66,3 @@ class ConstraintsIn(BaseModel):
 class ConstraintsOut(BaseModel):
     blockedSlots: list[BlockedSlotIn]
     timePreference: str
-
-
-class AiSettingsIn(BaseModel):
-    aiEnabled: bool
-    # Omitted means "keep the stored key" - the frontend never holds the real key.
-    apiKey: str | None = Field(default=None, min_length=10, max_length=200)
-
-
-class AiSettingsOut(BaseModel):
-    """Deliberately has no apiKey field - the key never leaves the server."""
-
-    aiEnabled: bool
-    hasApiKey: bool
-    keyHint: str | None = None

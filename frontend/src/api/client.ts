@@ -2,7 +2,6 @@
 // the auth header and error handling live in exactly one place.
 
 import type {
-  AiSettings,
   Board,
   Course,
   CourseMember,
@@ -11,7 +10,12 @@ import type {
   Grades,
   MasteryLevel,
   Material,
+  MaterialAnalysis,
+  MaterialConfirmation,
   Priority,
+  SyllabusAnalysis,
+  SyllabusConfirmation,
+  SyllabusItemDecision,
   Schedule,
   Sprint,
   StudentPlan,
@@ -110,6 +114,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   return response.status === 204 ? (undefined as T) : response.json()
+}
+
+function singleFile(file: File): FormData {
+  const body = new FormData()
+  body.append('file', file)
+  return body
 }
 
 async function downloadIcs(path: string, filename: string): Promise<void> {
@@ -236,6 +246,36 @@ export const api = {
       method: 'DELETE',
     }),
 
+  // Content analysis (FR2.8, FR2.10): store and understand one file, then the
+  // student confirms where it goes. Nothing changes until the confirm call.
+  analyzeMaterial: (courseId: string, file: File) =>
+    request<MaterialAnalysis>(`/courses/${courseId}/materials/analyze`, {
+      method: 'POST',
+      body: singleFile(file),
+    }),
+
+  confirmMaterial: (
+    courseId: string,
+    materialId: string,
+    decision: { decision: 'attach'; topicId: string } | { decision: 'create'; title?: string },
+  ) =>
+    request<MaterialConfirmation>(`/courses/${courseId}/materials/${materialId}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify(decision),
+    }),
+
+  analyzeSyllabus: (courseId: string, file: File) =>
+    request<SyllabusAnalysis>(`/courses/${courseId}/syllabus/analyze`, {
+      method: 'POST',
+      body: singleFile(file),
+    }),
+
+  confirmSyllabus: (courseId: string, materialId: string, items: SyllabusItemDecision[]) =>
+    request<SyllabusConfirmation>(`/courses/${courseId}/syllabus/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ materialId, items }),
+    }),
+
   // Materials attached to a topic (FR2.9) - the student's own only.
   listMaterials: (courseId: string, topicId: string) =>
     request<Material[]>(`/courses/${courseId}/topics/${topicId}/materials`),
@@ -274,14 +314,6 @@ export const api = {
   },
 
   getSprint: () => request<Sprint>('/sprint'),
-
-  getAiSettings: () => request<AiSettings>('/ai-settings'),
-
-  saveAiSettings: (settings: { aiEnabled: boolean; apiKey?: string }) =>
-    request<AiSettings>('/ai-settings', {
-      method: 'PUT',
-      body: JSON.stringify(settings),
-    }),
 
   getBoard: (courseId?: string) =>
     request<Board>(courseId ? `/board?courseId=${courseId}` : '/board'),

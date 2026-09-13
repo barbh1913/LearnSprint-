@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
 
+    # The backend's own Anthropic key for content analysis (FR2.7, ADR 0013).
+    # Empty means AI is off and the keyword heuristic runs for every upload.
+    # Never returned by any endpoint and never logged.
+    system_anthropic_api_key: str = ""
+
     # Cognito user pool with Google as an identity provider. Empty means the
     # Cognito path is off and only the local email/password login works.
     cognito_user_pool_id: str = ""

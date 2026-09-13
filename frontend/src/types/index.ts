@@ -42,6 +42,82 @@ export interface Material {
   uploadedAt: string
 }
 
+/** What the AI (or the heuristic) understood about a file (FR2.7). */
+export interface MaterialContent {
+  title: string
+  summary: string | null
+  keyPoints: string[]
+  topics: string[]
+  estimatedMinutes: number | null
+  language: string
+}
+
+export interface MatchCandidate {
+  topicId: string
+  topicName: string
+  confidence: number
+  reason: string
+}
+
+/** LearnSprint's own recommendation - attach to an existing topic or create a new one (FR2.8). */
+export interface MatchRecommendation {
+  decision: 'attach_existing' | 'create_new'
+  topicId: string | null
+  topicName: string | null
+  confidence: number
+  reason: string
+  suggestedTitle: string
+  alternatives: MatchCandidate[]
+}
+
+export interface MaterialAnalysis {
+  materialId: string
+  fileName: string
+  analysedBy: 'ai' | 'heuristic'
+  note: string | null
+  content: MaterialContent
+  recommendation: MatchRecommendation
+}
+
+export interface MaterialConfirmation {
+  materialId: string
+  topicId: string
+  topicName: string
+  created: boolean
+  alreadyConfirmed: boolean
+}
+
+export interface SyllabusProposal {
+  index: number
+  title: string
+  summary: string | null
+  keyPoints: string[]
+  estimatedMinutes: number | null
+  match: MatchRecommendation
+}
+
+export interface SyllabusAnalysis {
+  materialId: string
+  fileName: string
+  analysedBy: 'ai' | 'heuristic'
+  note: string | null
+  proposals: SyllabusProposal[]
+}
+
+export interface SyllabusItemDecision {
+  index: number
+  decision: 'create' | 'attach' | 'skip'
+  title?: string
+  topicId?: string
+}
+
+export interface SyllabusConfirmation {
+  created: { topicId: string; name: string }[]
+  attached: { topicId: string; name: string }[]
+  skipped: number
+  alreadyConfirmed: boolean
+}
+
 export type ActionType = 'read' | 'summarize' | 'quiz' | 'custom'
 
 export type TopicStatus = 'backlog' | 'todo' | 'in_progress' | 'needs_review' | 'done'
@@ -197,12 +273,6 @@ export interface Sprint {
   topicCount: number
   backlogCount: number
   status: 'empty' | 'healthy' | 'tight' | 'over_committed' | 'no_capacity'
-}
-
-export interface AiSettings {
-  aiEnabled: boolean
-  hasApiKey: boolean
-  keyHint: string | null
 }
 
 export interface WeeklyCount {

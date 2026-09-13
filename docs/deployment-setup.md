@@ -12,7 +12,7 @@
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
 | S3 (uploads) | `learnsprint-uploads-835505308330` — one key per file, under `{userId}/{courseId}/...` |
 | CloudFront | `E2GSBED87C32YJ` |
-| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint, plus the ones added since (7 for the Calendar and Google sync, 6 for subtasks and materials — see below) |
+| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint, plus the ones added since (7 for the Calendar and Google sync, 6 for subtasks and materials, 4 for AI content analysis — see below; the 2 `/ai-settings` routes are obsolete) |
 | CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
 ## One remaining step: add the GitHub secrets
@@ -107,6 +107,24 @@ DELETE /integrations/google-calendar/connection
 ```
 `POST /integrations/google-calendar/sync` takes an optional `courseId` query parameter; without it every course with a plan is synced.
 Nothing changes on the frontend side — the backend builds the Google authorize URL, so the client id and secret never reach the browser and no new `VITE_` variable is needed.
+
+## AI content analysis (FR2.7, FR2.8, FR2.10) — one variable, four routes
+
+AI is a backend capability ([ADR 0013](adr/0013-content-intelligence-pipeline.md)); there is nothing per student to configure any more, and the old `GET/PUT /ai-settings` routes can be deleted from API Gateway.
+
+**1. The key** — on `learnsprint-content-topics` only (the only function that calls Anthropic):
+```
+aws lambda update-function-configuration --function-name learnsprint-content-topics --environment "Variables={SYSTEM_ANTHROPIC_API_KEY=sk-ant-...}"
+```
+As with the Google variables, `--environment` replaces the whole map - include whatever the function already has. Put the same value in `backend/.env` for local development. **Set a spending limit on the key in the Anthropic console**: it now serves every student's upload. Leaving it empty is safe - every upload then uses the keyword heuristic.
+
+**2. Routes** — four new exact routes on the `learnsprint-content-topics` integration:
+```
+POST /courses/{course_id}/materials/analyze
+POST /courses/{course_id}/materials/{material_id}/confirm
+POST /courses/{course_id}/syllabus/analyze
+POST /courses/{course_id}/syllabus/confirm
+```
 
 ## Subtasks and materials (FR2.3, FR2.9) — routes only
 

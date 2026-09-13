@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Plus, Sparkles, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { AiSettings, BlockedSlot, UserConstraints } from '../types'
+import type { BlockedSlot, UserConstraints } from '../types'
 import {
   Button,
   Card,
@@ -95,8 +95,6 @@ export function ProfilePage() {
         <p className="text-sm text-muted-foreground">{user?.email}</p>
       </Card>
 
-      <AiSettingsCard />
-
       <Card className="mb-4">
         <h2 className="mb-3 font-medium">When do you study best?</h2>
         <Field label="Preferred study time">
@@ -187,121 +185,5 @@ export function ProfilePage() {
         {savedNote && <p className="text-sm text-muted-foreground">{savedNote}</p>}
       </div>
     </>
-  )
-}
-
-/**
- * Opt-in AI analysis using the student's own Anthropic key.
- *
- * The key is write-only from the browser's point of view: it's sent once, and
- * the API only ever returns whether one is stored plus its last 4 characters.
- */
-function AiSettingsCard() {
-  const [settings, setSettings] = useState<AiSettings | null>(null)
-  const [apiKey, setApiKey] = useState('')
-  const [error, setError] = useState('')
-  const [note, setNote] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-
-  useEffect(() => {
-    api
-      .getAiSettings()
-      .then(setSettings)
-      .catch((caught) => setError(caught.message))
-  }, [])
-
-  async function save(enabled: boolean) {
-    setIsSaving(true)
-    setError('')
-    setNote('')
-
-    try {
-      const saved = await api.saveAiSettings({
-        aiEnabled: enabled,
-        ...(apiKey ? { apiKey } : {}),
-      })
-      setSettings(saved)
-      setApiKey('')
-      setNote(
-        enabled
-          ? 'AI analysis is on. Your next upload will be analysed with it.'
-          : 'AI analysis is off. Uploads use the built-in analyser.',
-      )
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  if (!settings) return null
-
-  return (
-    <Card className="mb-4">
-      <div className="mb-3 flex items-start gap-2">
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-        <div>
-          <h2 className="font-medium">AI analysis of course material</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            With your own Anthropic API key, uploaded syllabi and slide decks are analysed to
-            work out the real topics and how long each one takes to learn — instead of the
-            default time estimates.
-          </p>
-        </div>
-      </div>
-
-      <div className="mb-3 flex items-center gap-2 text-sm">
-        <span
-          className={
-            settings.aiEnabled
-              ? 'rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-              : 'rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-          }
-        >
-          {settings.aiEnabled ? 'Enabled' : 'Disabled'}
-        </span>
-        {settings.hasApiKey && (
-          <span className="text-xs text-muted-foreground">Key on file: {settings.keyHint}</span>
-        )}
-      </div>
-
-      <Field label={settings.hasApiKey ? 'Replace API key (optional)' : 'Anthropic API key'}>
-        <Input
-          type="password"
-          value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
-          placeholder="sk-ant-..."
-          autoComplete="off"
-          className="max-w-md"
-        />
-      </Field>
-
-      <p className="mt-2 text-xs text-muted-foreground">
-        Your key is stored on your own account and never shown again after you save it. It is
-        only used to analyse files you upload.
-      </p>
-
-      {error && (
-        <div className="mt-3">
-          <ErrorNote message={error} />
-        </div>
-      )}
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button
-          variant="primary"
-          onClick={() => save(true)}
-          disabled={isSaving || (!settings.hasApiKey && !apiKey)}
-        >
-          {isSaving ? 'Checking key' : settings.aiEnabled ? 'Update key' : 'Enable AI analysis'}
-        </Button>
-        {settings.aiEnabled && (
-          <Button onClick={() => save(false)} disabled={isSaving}>
-            Turn off
-          </Button>
-        )}
-        {note && <p className="text-sm text-muted-foreground">{note}</p>}
-      </div>
-    </Card>
   )
 }

@@ -16,7 +16,7 @@
 | Function | Owns | Routes |
 |---|---|---|
 | `learnsprint-auth` | `shared/auth` | `/auth/*`, `/health` |
-| `learnsprint-academic-profile` | `academic_profile` | `/courses`, `/grades`, `/constraints`, `/ai-settings` |
+| `learnsprint-academic-profile` | `academic_profile` | `/courses`, `/grades`, `/constraints` |
 | `learnsprint-content-topics` | `content_topics` | `/courses/{id}/topics*` — reads/writes S3, runs AI or heuristic analysis |
 | `learnsprint-scheduling` | `scheduling` | `/courses/{id}/schedule*` |
 | `learnsprint-progress` | `progress` | `/board`, `/sprint`, `/velocity`, progress endpoints |

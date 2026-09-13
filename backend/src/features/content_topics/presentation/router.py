@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from features.academic_profile.infrastructure import repository as course_repo
+from features.content_topics.application import material_analysis
 from features.content_topics.domain.estimates import split_total_minutes
 from features.content_topics.domain.extraction import extract_topics
 from features.content_topics.infrastructure import ai_extractor
@@ -16,6 +17,7 @@ from features.content_topics.infrastructure import repository
 from features.progress.infrastructure import repository as progress_repo
 from shared import storage
 from shared.auth.dependencies import get_current_user_id
+from shared.config import settings
 
 router = APIRouter(tags=["content-topics"])
 
@@ -95,6 +97,103 @@ class DownloadLinkOut(BaseModel):
     expiresInSeconds: int
 
 
+# --- Analysis flows (FR2.8, FR2.10) ---
+
+
+class ContentOut(BaseModel):
+    """What the AI or the heuristic understood about a file."""
+
+    title: str
+    summary: str | None = None
+    keyPoints: list[str] = []
+    topics: list[str] = []
+    estimatedMinutes: int | None = None
+    language: str
+
+
+class MatchCandidateOut(BaseModel):
+    topicId: str
+    topicName: str
+    confidence: float
+    reason: str
+
+
+class MatchOut(BaseModel):
+    """LearnSprint's recommendation - attach to an existing topic or create a new one."""
+
+    decision: Literal["attach_existing", "create_new"]
+    topicId: str | None = None
+    topicName: str | None = None
+    confidence: float
+    reason: str
+    suggestedTitle: str
+    alternatives: list[MatchCandidateOut] = []
+
+
+class MaterialAnalysisOut(BaseModel):
+    materialId: str
+    fileName: str
+    analysedBy: str
+    note: str | None = None
+    content: ContentOut
+    recommendation: MatchOut
+
+
+class MaterialConfirmIn(BaseModel):
+    decision: Literal["attach", "create"]
+    topicId: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class MaterialConfirmOut(BaseModel):
+    materialId: str
+    topicId: str
+    topicName: str
+    created: bool
+    alreadyConfirmed: bool
+
+
+class SyllabusProposalOut(BaseModel):
+    index: int
+    title: str
+    summary: str | None = None
+    keyPoints: list[str] = []
+    estimatedMinutes: int | None = None
+    match: MatchOut
+
+
+class SyllabusAnalysisOut(BaseModel):
+    materialId: str
+    fileName: str
+    analysedBy: str
+    note: str | None = None
+    proposals: list[SyllabusProposalOut]
+
+
+class SyllabusItemIn(BaseModel):
+    index: int = Field(ge=0)
+    decision: Literal["create", "attach", "skip"]
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    topicId: str | None = None
+
+
+class SyllabusConfirmIn(BaseModel):
+    materialId: str
+    items: list[SyllabusItemIn]
+
+
+class TopicRefOut(BaseModel):
+    topicId: str
+    name: str
+
+
+class SyllabusConfirmOut(BaseModel):
+    created: list[TopicRefOut]
+    attached: list[TopicRefOut]
+    skipped: int
+    alreadyConfirmed: bool
+
+
 class ExtractionResult(BaseModel):
     created: list[TopicOut]
     detectedLanguage: str
@@ -120,7 +219,7 @@ async def extract_from_files(
     whole semester of lecture decks produces a single de-duplicated topic list
     rather than one per file.
 
-    If the student enabled AI analysis and stored their API key, Claude reads the
+    When the backend has an Anthropic key configured (FR2.7), Claude reads the
     material and estimates how long each topic takes to learn. Otherwise - or if
     the AI call fails for any reason - the keyword heuristic runs instead and the
     default per-action durations apply. Either way the upload succeeds.
@@ -137,8 +236,7 @@ async def extract_from_files(
     if not lines:
         raise HTTPException(status_code=422, detail="Those files had no readable text")
 
-    ai_settings = course_repo.get_ai_settings(user_id)
-    topics, analysed_by, note = _analyse(lines, ai_settings)
+    topics, analysed_by, note = _analyse(lines)
 
     if not topics:
         raise HTTPException(
@@ -203,17 +301,15 @@ async def _read_all(
     return lines, filenames
 
 
-def _analyse(
-    lines: list[str], ai_settings: dict[str, Any]
-) -> tuple[list[tuple[str, int | None, str]], str, str | None]:
-    """Run AI analysis when it's enabled, otherwise the heuristic.
+def _analyse(lines: list[str]) -> tuple[list[tuple[str, int | None, str]], str, str | None]:
+    """Run AI analysis when the backend has a key, otherwise the heuristic.
 
     Returns (topics, which analyser ran, an optional note for the student).
     The AI path is never allowed to fail the upload.
     """
-    if ai_settings.get("aiEnabled") and ai_settings.get("apiKey"):
+    if settings.system_anthropic_api_key:
         try:
-            analysed = ai_extractor.analyse_syllabus(lines, api_key=ai_settings["apiKey"])
+            analysed = ai_extractor.analyse_syllabus(lines, api_key=settings.system_anthropic_api_key)
             return (
                 [(topic.name, topic.estimated_minutes, topic.language) for topic in analysed],
                 "ai",
@@ -399,6 +495,194 @@ def delete_topic(
     for material in repository.list_topic_materials(course_id, topic_id):
         storage.delete_object(material["s3Key"])
         repository.delete_material(course_id, material["id"])
+
+
+# --- Analysis flows (FR2.8, FR2.10) --------------------------------------------
+#
+# Analyse stores the file and what it is about; nothing about the course changes
+# until the student confirms. Both steps check course membership, and confirm
+# also checks that the material is the caller's own.
+
+
+@router.post(
+    "/courses/{course_id}/materials/analyze",
+    response_model=MaterialAnalysisOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def analyze_material(
+    course_id: str,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+) -> MaterialAnalysisOut:
+    """One file: store it, understand it, and recommend where it belongs (FR2.8)."""
+    _require_membership(user_id, course_id)
+    file_name, key, size, lines = await _store_and_read(file, user_id=user_id, course_id=course_id)
+
+    result = material_analysis.analyse_material(
+        user_id=user_id, course_id=course_id, file_name=file_name, s3_key=key, size_bytes=size, lines=lines
+    )
+    return MaterialAnalysisOut(
+        materialId=result["material"]["id"],
+        fileName=file_name,
+        analysedBy=result["analysedBy"],
+        note=result["note"],
+        content=_content_out(result["content"]),
+        recommendation=_match_out(result["match"]),
+    )
+
+
+@router.post("/courses/{course_id}/materials/{material_id}/confirm", response_model=MaterialConfirmOut)
+def confirm_material(
+    course_id: str,
+    material_id: str,
+    payload: MaterialConfirmIn,
+    user_id: str = Depends(get_current_user_id),
+) -> MaterialConfirmOut:
+    """The student's decision: attach to a topic, or create one. Safe to repeat."""
+    material = _require_own_pending_material(user_id, course_id, material_id)
+    if payload.decision == "attach" and not payload.topicId:
+        raise HTTPException(status_code=422, detail="Choose the topic to attach to")
+
+    try:
+        result = material_analysis.confirm_material(
+            material, decision=payload.decision, topic_id=payload.topicId, title=payload.title
+        )
+    except material_analysis.TopicGone as exc:
+        raise HTTPException(
+            status_code=404, detail="That topic no longer exists - choose another or create a new one"
+        ) from exc
+    except material_analysis.WrongKindOfMaterial as exc:
+        raise HTTPException(status_code=400, detail="This file was analysed as a syllabus") from exc
+
+    return MaterialConfirmOut(materialId=material_id, **result)
+
+
+@router.post(
+    "/courses/{course_id}/syllabus/analyze",
+    response_model=SyllabusAnalysisOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def analyze_syllabus(
+    course_id: str,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+) -> SyllabusAnalysisOut:
+    """A syllabus: store it and propose roughly one topic per lecture for review (FR2.10)."""
+    _require_membership(user_id, course_id)
+    file_name, key, size, lines = await _store_and_read(file, user_id=user_id, course_id=course_id)
+
+    result = material_analysis.analyse_syllabus(
+        user_id=user_id, course_id=course_id, file_name=file_name, s3_key=key, size_bytes=size, lines=lines
+    )
+    if not result["proposals"]:
+        raise HTTPException(
+            status_code=422, detail="No lectures could be found in this file. Try the batch upload instead."
+        )
+
+    return SyllabusAnalysisOut(
+        materialId=result["material"]["id"],
+        fileName=file_name,
+        analysedBy=result["analysedBy"],
+        note=result["note"],
+        proposals=[
+            SyllabusProposalOut(
+                index=index,
+                title=proposal.title,
+                summary=proposal.summary,
+                keyPoints=list(proposal.key_points),
+                estimatedMinutes=proposal.estimated_minutes,
+                match=_match_out(match),
+            )
+            for index, (proposal, match) in enumerate(zip(result["proposals"], result["matches"]))
+        ],
+    )
+
+
+@router.post("/courses/{course_id}/syllabus/confirm", response_model=SyllabusConfirmOut)
+def confirm_syllabus(
+    course_id: str,
+    payload: SyllabusConfirmIn,
+    user_id: str = Depends(get_current_user_id),
+) -> SyllabusConfirmOut:
+    """Create or attach the reviewed proposals. Confirming twice returns the first result."""
+    material = _require_own_pending_material(user_id, course_id, payload.materialId)
+    for item in payload.items:
+        if item.decision == "attach" and not item.topicId:
+            raise HTTPException(status_code=422, detail=f"Proposal {item.index}: choose the topic to attach to")
+
+    try:
+        result = material_analysis.confirm_syllabus(
+            material, [item.model_dump() for item in payload.items]
+        )
+    except material_analysis.TopicGone as exc:
+        raise HTTPException(status_code=404, detail="A chosen topic no longer exists - review the list again") from exc
+    except material_analysis.WrongKindOfMaterial as exc:
+        raise HTTPException(status_code=400, detail="This file was analysed as a single material") from exc
+    except material_analysis.BadProposal as exc:
+        raise HTTPException(status_code=422, detail="That proposal is not part of this analysis") from exc
+
+    return SyllabusConfirmOut(**result)
+
+
+async def _store_and_read(
+    file: UploadFile, *, user_id: str, course_id: str
+) -> tuple[str, str, int, list[str]]:
+    """Store one upload under the student's prefix and read its text back from the stored copy.
+
+    A file that turns out unreadable is removed again - nothing is kept that the
+    student can never use. (AI failing later is different: the file is fine and
+    the heuristic takes over.)
+    """
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"{file.filename} is larger than 20 MB")
+    if not content:
+        raise HTTPException(status_code=400, detail=f"{file.filename} is empty")
+
+    file_name = file.filename or "upload"
+    key = storage.upload_key(user_id, course_id, file_name)
+    storage.put_object(key, content)
+
+    try:
+        lines = file_parser.read_lines(file_name, storage.get_object(key))
+    except file_parser.UnsupportedFileType as exc:
+        storage.delete_object(key)
+        raise HTTPException(status_code=400, detail="Only PDF and PPTX files are supported") from exc
+    except Exception as exc:  # noqa: BLE001 - a corrupt upload shouldn't 500
+        storage.delete_object(key)
+        raise HTTPException(status_code=400, detail=f"Could not read {file_name}") from exc
+
+    if not lines:
+        storage.delete_object(key)
+        raise HTTPException(status_code=422, detail="That file had no readable text")
+    return file_name, key, len(content), lines
+
+
+def _require_own_pending_material(user_id: str, course_id: str, material_id: str) -> dict[str, Any]:
+    _require_membership(user_id, course_id)
+    material = repository.get_material(course_id, material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="Material not found")
+    if material["userId"] != user_id:
+        raise HTTPException(status_code=403, detail="This material belongs to another student")
+    return material
+
+
+def _content_out(content: material_analysis.MaterialContent) -> ContentOut:
+    return ContentOut(
+        title=content.title,
+        summary=content.summary,
+        keyPoints=list(content.key_points),
+        topics=list(content.topics),
+        estimatedMinutes=content.estimated_minutes,
+        language=content.language,
+    )
+
+
+def _match_out(match: material_analysis.RankedMatch) -> MatchOut:
+    data = material_analysis.match_to_dict(match)
+    data.pop("isAttach")
+    return MatchOut(**data)
 
 
 # --- Materials (FR2.9) -------------------------------------------------------
