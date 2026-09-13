@@ -14,17 +14,22 @@ const EXAM_TYPES: { value: ExamType; label: string }[] = [
 
 export function CourseForm({
   course,
+  defaultYear,
+  defaultSemester,
   onSaved,
   onCancel,
 }: {
   /** Omit to create a new course, pass one to edit it. */
   course?: Course
+  /** Seeds a new course from the list page's active filter, ignored when editing. */
+  defaultYear?: number
+  defaultSemester?: string
   onSaved: () => void
   onCancel: () => void
 }) {
   const [name, setName] = useState(course?.name ?? '')
-  const [year, setYear] = useState(course?.year ?? 1)
-  const [semester, setSemester] = useState(course?.semester ?? 'A')
+  const [year, setYear] = useState(course?.year ?? defaultYear ?? 1)
+  const [semester, setSemester] = useState(course?.semester ?? defaultSemester ?? 'A')
   const [credits, setCredits] = useState(course?.credits ?? 3)
   const [examDate, setExamDate] = useState(toDateInput(course?.examDate))
   const [examType, setExamType] = useState<ExamType>(course?.examType ?? 'closed')

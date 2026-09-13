@@ -1,12 +1,18 @@
 // Small shared building blocks. Keeping them here rather than repeating Tailwind
 // strings across pages is what keeps the styling consistent.
 
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+export function Card({
+  className,
+  children,
+  ...rest
+}: { className?: string; children: ReactNode } & HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('rounded-xl border border-border bg-card p-5', className)}>{children}</div>
+    <div className={cn('rounded-xl border border-border bg-card p-5', className)} {...rest}>
+      {children}
+    </div>
   )
 }
 
