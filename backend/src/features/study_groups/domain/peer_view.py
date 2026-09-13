@@ -13,7 +13,7 @@ from features.progress.domain import status as status_rules
 
 # Fields that must never cross between members. Kept as an explicit list so the
 # guard test can assert on it instead of trusting that nobody adds one later.
-PRIVATE_FIELDS = ("finalGrade", "blockedSlots", "timePreference", "apiKey", "passwordHash")
+PRIVATE_FIELDS = ("finalGrade", "blockedSlots", "timePreference")
 
 
 @dataclass(frozen=True)

@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from shared import dynamo, storage
+from shared.auth import cognito_users
 
 
 class FakeTable:
@@ -75,6 +76,82 @@ class FakeBucket:
 
     def presigned_get_url(self, key: str, *, file_name: str, expires_in: int) -> str:
         return f"https://fake-bucket.test/{key}?filename={file_name}&expires={expires_in}"
+
+
+class FakeCognito:
+    """Dict-backed stand-in for the user pool: email -> password (None for a Google-only user)."""
+
+    def __init__(self) -> None:
+        self.users: dict[str, str | None] = {}
+        self.reset_codes: dict[str, str] = {}
+        self.deleted: list[str] = []
+        self.weak_passwords: set[str] = set()
+
+    def is_configured(self) -> bool:
+        return True
+
+    def sign_up(self, email: str, password: str) -> None:
+        if email in self.users:
+            raise cognito_users.EmailAlreadyRegistered()
+        self._check_policy(password)
+        self.users[email] = password
+
+    def verify_password(self, email: str, password: str) -> None:
+        stored = self.users.get(email)
+        if stored is None or stored != password:
+            raise cognito_users.InvalidCredentials()
+
+    def set_password(self, email: str, password: str) -> None:
+        if email not in self.users:
+            raise cognito_users.UserNotFound()
+        self._check_policy(password)
+        self.users[email] = password
+
+    def forgot_password(self, email: str) -> None:
+        if email in self.users:
+            self.reset_codes[email] = "123456"
+
+    def confirm_forgot_password(self, email: str, code: str, password: str) -> None:
+        if email not in self.users:
+            raise cognito_users.UserNotFound()
+        if self.reset_codes.get(email) != code:
+            raise cognito_users.InvalidCode()
+        self._check_policy(password)
+        self.users[email] = password
+        del self.reset_codes[email]
+
+    def has_password(self, email: str) -> bool:
+        return self.users.get(email) is not None
+
+    def delete_user(self, email: str) -> None:
+        self.users.pop(email, None)
+        self.deleted.append(email)
+
+    def add_google_user(self, email: str) -> None:
+        """A person who only ever signed in through Google: known to the pool, no password."""
+        self.users.setdefault(email, None)
+
+    def _check_policy(self, password: str) -> None:
+        if password in self.weak_passwords:
+            raise cognito_users.WeakPassword("Password did not conform with policy")
+
+
+@pytest.fixture(autouse=True)
+def fake_cognito(monkeypatch: pytest.MonkeyPatch) -> FakeCognito:
+    """Point the auth layer at the fake pool - no AWS call ever leaves a test."""
+    pool = FakeCognito()
+    for name in (
+        "is_configured",
+        "sign_up",
+        "verify_password",
+        "set_password",
+        "forgot_password",
+        "confirm_forgot_password",
+        "has_password",
+        "delete_user",
+    ):
+        monkeypatch.setattr(cognito_users, name, getattr(pool, name))
+    return pool
 
 
 @pytest.fixture(autouse=True)

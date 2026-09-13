@@ -1,7 +1,8 @@
-"""User storage on DynamoDB.
+"""User profile storage on DynamoDB.
 
-Email lookup goes through GSI1 (GSI1PK=EMAIL#<email>) because login only knows
-the email, not the user id.
+Only the LearnSprint profile lives here - the credential is Cognito's
+(ADR 0014). Email lookup goes through GSI1 (GSI1PK=EMAIL#<email>) because
+login only knows the email, not the user id.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Any
 from shared import dynamo
 
 
-def create_user(email: str, password_hash: str | None) -> dict[str, Any]:
+def create_user(email: str) -> dict[str, Any]:
     user_id = str(uuid.uuid4())
     item = {
         "PK": dynamo.user_pk(user_id),
@@ -23,7 +24,6 @@ def create_user(email: str, password_hash: str | None) -> dict[str, Any]:
         "entity": "User",
         "id": user_id,
         "email": email.lower(),
-        "passwordHash": password_hash,
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     dynamo.put_item(item)
@@ -40,13 +40,19 @@ def find_by_id(user_id: str) -> dict[str, Any] | None:
 
 
 def find_or_create_by_email(email: str) -> dict[str, Any]:
-    """The user for an email, created on first sight - used by Google sign-in.
+    """The profile for an email, created on first sight.
 
-    A user created this way has no password hash, so they can only ever get in
-    through Cognito. If the email already exists as a password account, that
-    account is returned, so one person never ends up with two.
+    Whether the person arrived with a password or through Google, the same
+    address is the same account, so a student's courses never split depending
+    on which button they pressed.
     """
     existing = find_by_email(email)
     if existing is not None:
         return existing
-    return create_user(email, password_hash=None)
+    return create_user(email)
+
+
+def delete_everything_under(user_id: str) -> None:
+    """Every row in the user's own partition: profile, memberships, progress, constraints, connections."""
+    for item in dynamo.query_prefix(dynamo.user_pk(user_id)):
+        dynamo.delete_item(item["PK"], item["SK"])

@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     # Never returned by any endpoint and never logged.
     system_anthropic_api_key: str = ""
 
-    # Cognito user pool with Google as an identity provider. Empty means the
-    # Cognito path is off and only the local email/password login works.
+    # The Cognito user pool that holds every account - password and Google
+    # (ADR 0014). Empty means no sign-in works: every /auth endpoint answers 503.
     cognito_user_pool_id: str = ""
     cognito_client_id: str = ""
     cognito_region: str = "il-central-1"

@@ -26,9 +26,8 @@ from features.academic_profile.domain.grades import (
     average_per_semester,
     overall_average,
 )
+from features.academic_profile.application import account_deletion
 from features.academic_profile.infrastructure import repository
-from features.content_topics.infrastructure import repository as topic_repo
-from features.progress.infrastructure import repository as progress_repo
 from shared.auth.dependencies import get_current_user_id
 
 router = APIRouter(tags=["academic-profile"])
@@ -79,27 +78,7 @@ def delete_course(course_id: str, user_id: str = Depends(get_current_user_id)) -
     if membership["role"] != "owner":
         raise HTTPException(status_code=403, detail="Only the course owner can delete it")
 
-    _delete_all_members_progress(course_id)
-    repository.delete_course(course_id)
-
-
-def _delete_all_members_progress(course_id: str) -> None:
-    """Clean up every member's private progress rows before the shared topics
-    they point at disappear - otherwise they'd sit orphaned in DynamoDB forever,
-    under a partition (PK=USER#<id>) this delete never otherwise touches.
-    """
-    action_ids_by_topic: dict[str, list[str]] = {}
-    for action in topic_repo.list_actions(course_id):
-        action_ids_by_topic.setdefault(action["topicId"], []).append(action["id"])
-
-    topic_ids = [topic["id"] for topic in topic_repo.list_topics(course_id)]
-    member_ids = [member["userId"] for member in repository.list_course_members(course_id)]
-
-    for member_id in member_ids:
-        for topic_id in topic_ids:
-            progress_repo.delete_topic_progress(
-                member_id, topic_id, action_ids_by_topic.get(topic_id, [])
-            )
+    account_deletion.delete_course_for_everyone(course_id)
 
 
 @router.put("/courses/{course_id}/grade", response_model=CourseOut)
