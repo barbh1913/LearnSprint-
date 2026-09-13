@@ -232,6 +232,11 @@ export const api = {
     }),
   disconnectGoogleCalendar: () =>
     request<void>('/integrations/google-calendar/connection', { method: 'DELETE' }),
+  syncGoogleCalendar: (courseId: string) =>
+    request<{ synced: number; lastSyncedAt: string }>(
+      `/integrations/google-calendar/sync?courseId=${encodeURIComponent(courseId)}`,
+      { method: 'POST' },
+    ),
 
   /** Downloads the plan as .ics so it can be imported into Google Calendar. */
   downloadScheduleIcs: async (courseId: string, courseName: string) => {

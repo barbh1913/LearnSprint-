@@ -216,7 +216,7 @@ export function CalendarPage() {
         </div>
       )}
 
-      <GoogleCalendarControls />
+      <GoogleCalendarControls courseId={courseId} canSync={hasPlan} />
 
       {!courseId ? (
         <EmptyState

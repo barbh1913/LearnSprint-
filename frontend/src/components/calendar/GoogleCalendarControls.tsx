@@ -11,13 +11,20 @@ import { rememberState } from './googleCalendarState'
  * the feature just doesn't show it.
  */
 export function GoogleCalendarControls({
+  courseId,
+  canSync,
   goToExternal = (url) => window.location.assign(url),
 }: {
+  /** The course whose plan "Sync now" pushes; nothing to sync without one. */
+  courseId: string
+  /** False while the plan is infeasible or empty - the button explains instead of failing. */
+  canSync: boolean
   /** Overridable so tests can catch the redirect instead of leaving jsdom. */
   goToExternal?: (url: string) => void
 }) {
   const [status, setStatus] = useState<GoogleCalendarStatus | null>(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [isBusy, setIsBusy] = useState(false)
 
   const loadStatus = useCallback(() => {
@@ -47,11 +54,31 @@ export function GoogleCalendarControls({
   async function handleDisconnect() {
     setIsBusy(true)
     setError('')
+    setNotice('')
     try {
       await api.disconnectGoogleCalendar()
       loadStatus()
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not disconnect')
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function handleSync() {
+    setIsBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await api.syncGoogleCalendar(courseId)
+      setNotice(
+        result.synced === 1
+          ? '1 session is now in your Google Calendar.'
+          : `${result.synced} sessions are now in your Google Calendar.`,
+      )
+      loadStatus()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not sync')
     } finally {
       setIsBusy(false)
     }
@@ -88,9 +115,26 @@ export function GoogleCalendarControls({
 
         <div className="flex items-center gap-2">
           {status.connected ? (
-            <Button size="sm" variant="danger" onClick={handleDisconnect} disabled={isBusy}>
-              Disconnect
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={handleSync}
+                disabled={isBusy || !courseId || !canSync}
+                title={
+                  !courseId
+                    ? 'Pick a course first'
+                    : !canSync
+                      ? 'There is no plan to sync yet'
+                      : undefined
+                }
+              >
+                {isBusy ? 'Syncing' : 'Sync now'}
+              </Button>
+              <Button size="sm" variant="danger" onClick={handleDisconnect} disabled={isBusy}>
+                Disconnect
+              </Button>
+            </>
           ) : (
             <Button size="sm" variant="primary" onClick={handleConnect} disabled={isBusy}>
               {isBusy ? 'Opening Google' : 'Connect Google Calendar'}
@@ -102,6 +146,11 @@ export function GoogleCalendarControls({
         <div className="mt-3">
           <ErrorNote message={error} />
         </div>
+      )}
+      {notice && (
+        <p role="status" className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">
+          {notice}
+        </p>
       )}
     </Card>
   )

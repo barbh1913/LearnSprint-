@@ -34,10 +34,60 @@ describe('GoogleCalendarControls', () => {
       }),
     })
 
-    const { container } = render(<GoogleCalendarControls />)
+    const { container } = render(<GoogleCalendarControls courseId="c1" canSync />)
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('syncs the chosen course and reports how much landed', async () => {
+    let lastSyncedAt: string | null = null
+    const calls = mockApi({
+      'GET /integrations/google-calendar/status': () => ({
+        body: { configured: true, connected: true, connectedAt: '2026-09-16T10:00:00', lastSyncedAt },
+      }),
+      'POST /integrations/google-calendar/sync?courseId=c1': () => {
+        lastSyncedAt = '2026-09-16T12:30:00'
+        return { body: { synced: 7, lastSyncedAt } }
+      },
+    })
+
+    render(<GoogleCalendarControls courseId="c1" canSync />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('7 sessions are now in your Google Calendar.')
+    expect(await screen.findByText(/Last synced/)).toBeInTheDocument()
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1)
+  })
+
+  it('will not offer to sync a plan that does not fit', async () => {
+    mockApi({
+      'GET /integrations/google-calendar/status': () => ({
+        body: { configured: true, connected: true, connectedAt: '2026-09-16T10:00:00', lastSyncedAt: null },
+      }),
+    })
+
+    render(<GoogleCalendarControls courseId="c1" canSync={false} />)
+
+    expect(await screen.findByRole('button', { name: 'Sync now' })).toBeDisabled()
+  })
+
+  it('shows why the server refused a sync', async () => {
+    mockApi({
+      'GET /integrations/google-calendar/status': () => ({
+        body: { configured: true, connected: true, connectedAt: '2026-09-16T10:00:00', lastSyncedAt: null },
+      }),
+      'POST /integrations/google-calendar/sync?courseId=c1': () => ({
+        status: 502,
+        body: { detail: 'Google Calendar access has expired - connect it again' },
+      }),
+    })
+
+    render(<GoogleCalendarControls courseId="c1" canSync />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('connect it again')
   })
 
   it('offers to connect, remembers the state nonce, and leaves for Google', async () => {
@@ -51,7 +101,7 @@ describe('GoogleCalendarControls', () => {
     })
     const goToExternal = vi.fn()
 
-    render(<GoogleCalendarControls goToExternal={goToExternal} />)
+    render(<GoogleCalendarControls courseId="c1" canSync goToExternal={goToExternal} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Google Calendar' }))
 
@@ -78,7 +128,7 @@ describe('GoogleCalendarControls', () => {
       },
     })
 
-    render(<GoogleCalendarControls />)
+    render(<GoogleCalendarControls courseId="c1" canSync />)
 
     expect(await screen.findByText('Connected')).toBeInTheDocument()
     expect(screen.getByText(/not synced yet/)).toBeInTheDocument()

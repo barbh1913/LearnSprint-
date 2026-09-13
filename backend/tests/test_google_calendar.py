@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -21,6 +22,24 @@ def auth_headers(email: str = "student@example.com") -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def create_course_with_topics(headers: dict[str, str], *topics: str, exam_in_days: int = 21) -> dict[str, Any]:
+    course = client.post(
+        "/courses",
+        json={
+            "name": "Data Structures",
+            "year": 2,
+            "semester": "A",
+            "credits": 5,
+            "examDate": (datetime.now() + timedelta(days=exam_in_days)).isoformat(),
+            "examType": "closed",
+        },
+        headers=headers,
+    ).json()
+    for name in topics:
+        client.post(f"/courses/{course['id']}/topics", json={"name": name}, headers=headers)
+    return course
+
+
 class FakeGoogle:
     """Stands in for Google: records what the app asked it to do."""
 
@@ -30,7 +49,12 @@ class FakeGoogle:
         self.revoked: list[str] = []
         self.exchange_fails = False
         self.refresh_fails = False
+        self.insert_fails = False
         self.next_calendar = 0
+        # calendar id -> event id -> payload, so a sync's clear-then-insert is observable.
+        self.events: dict[str, dict[str, dict[str, Any]]] = {}
+        self.next_event = 0
+        self.deleted_events: list[str] = []
 
     def exchange_code(self, code: str) -> dict[str, Any]:
         if self.exchange_fails:
@@ -39,7 +63,9 @@ class FakeGoogle:
 
     def refresh_access_token(self, refresh_token: str) -> str:
         if self.refresh_fails:
-            raise google_calendar.GoogleReconnectRequired("expired")
+            raise google_calendar.GoogleReconnectRequired(
+                "Google Calendar access has expired - connect it again"
+            )
         return f"access-from-{refresh_token}"
 
     def create_calendar(self, access_token: str, summary: str = "LearnSprint") -> str:
@@ -54,11 +80,43 @@ class FakeGoogle:
     def revoke_token(self, token: str) -> None:
         self.revoked.append(token)
 
+    def list_event_ids(self, access_token: str, calendar_id: str, private_property: str) -> list[str]:
+        key, _, value = private_property.partition("=")
+        return [
+            event_id
+            for event_id, payload in self.events.get(calendar_id, {}).items()
+            if payload["extendedProperties"]["private"].get(key) == value
+        ]
+
+    def delete_events(self, access_token: str, calendar_id: str, event_ids: list[str]) -> None:
+        for event_id in event_ids:
+            self.events.get(calendar_id, {}).pop(event_id, None)
+            self.deleted_events.append(event_id)
+
+    def insert_events(self, access_token: str, calendar_id: str, events: list[dict[str, Any]]) -> None:
+        if self.insert_fails:
+            raise google_calendar.GoogleCalendarError("Google Calendar would not add the sessions")
+        for payload in events:
+            self.next_event += 1
+            self.events.setdefault(calendar_id, {})[f"ev-{self.next_event}"] = payload
+
+    def calendar_events(self, calendar_id: str = "cal-1") -> list[dict[str, Any]]:
+        return list(self.events.get(calendar_id, {}).values())
+
 
 @pytest.fixture
 def google(monkeypatch: pytest.MonkeyPatch) -> FakeGoogle:
     fake = FakeGoogle()
-    for name in ("exchange_code", "refresh_access_token", "create_calendar", "delete_calendar", "revoke_token"):
+    for name in (
+        "exchange_code",
+        "refresh_access_token",
+        "create_calendar",
+        "delete_calendar",
+        "revoke_token",
+        "list_event_ids",
+        "delete_events",
+        "insert_events",
+    ):
         monkeypatch.setattr(google_calendar, name, getattr(fake, name))
     return fake
 
@@ -203,10 +261,113 @@ class TestDisconnecting:
         assert client.delete("/integrations/google-calendar/connection", headers=headers).status_code == 204
 
 
+@pytest.mark.usefixtures("configured")
+class TestSyncing:
+    def sync(self, headers: dict[str, str], course_id: str):
+        return client.post(f"/integrations/google-calendar/sync?courseId={course_id}", headers=headers)
+
+    def test_writes_the_plan_into_the_learnsprint_calendar(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        course = create_course_with_topics(headers, "Trees", "Graphs")
+        connect(headers)
+
+        response = self.sync(headers, course["id"])
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        events = google.calendar_events()
+        assert body["synced"] == len(events) > 0
+        assert all(e["extendedProperties"]["private"]["learnsprintCourseId"] == course["id"] for e in events)
+        assert all(e["start"]["timeZone"] == "Asia/Jerusalem" for e in events)
+        assert body["lastSyncedAt"]
+        status = client.get("/integrations/google-calendar/status", headers=headers).json()
+        assert status["lastSyncedAt"] == body["lastSyncedAt"]
+
+    def test_syncing_again_replaces_rather_than_duplicates(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        course = create_course_with_topics(headers, "Trees")
+        connect(headers)
+        first = self.sync(headers, course["id"]).json()["synced"]
+
+        second = self.sync(headers, course["id"]).json()["synced"]
+
+        assert second == first
+        assert len(google.calendar_events()) == first
+        assert len(google.deleted_events) == first
+
+    def test_syncing_one_course_leaves_another_courses_sessions_alone(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        first_course = create_course_with_topics(headers, "Trees")
+        second_course = create_course_with_topics(headers, "Sorting")
+        connect(headers)
+        self.sync(headers, first_course["id"])
+        before = len(google.calendar_events())
+
+        self.sync(headers, second_course["id"])
+        self.sync(headers, second_course["id"])
+
+        first_left = [
+            e for e in google.calendar_events()
+            if e["extendedProperties"]["private"]["learnsprintCourseId"] == first_course["id"]
+        ]
+        assert len(first_left) == before
+
+    def test_refused_when_not_connected(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        course = create_course_with_topics(headers, "Trees")
+
+        response = self.sync(headers, course["id"])
+
+        assert response.status_code == 409
+        assert "Connect" in response.json()["detail"]
+
+    def test_refused_when_the_plan_does_not_fit(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        # The exam is in an hour: not even a crash review fits.
+        course = create_course_with_topics(headers, "Trees", "Graphs", "Hashing", exam_in_days=0)
+        connect(headers)
+
+        response = self.sync(headers, course["id"])
+
+        assert response.status_code == 409
+        assert google.calendar_events() == []
+
+    def test_a_dead_credential_asks_to_reconnect_instead_of_failing_quietly(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        course = create_course_with_topics(headers, "Trees")
+        connect(headers)
+        google.refresh_fails = True
+
+        response = self.sync(headers, course["id"])
+
+        assert response.status_code == 502
+        assert "connect" in response.json()["detail"].lower()
+
+    def test_google_failing_mid_sync_is_reported_and_leaves_no_sync_stamp(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        course = create_course_with_topics(headers, "Trees")
+        connect(headers)
+        google.insert_fails = True
+
+        response = self.sync(headers, course["id"])
+
+        assert response.status_code == 502
+        assert client.get("/integrations/google-calendar/status", headers=headers).json()["lastSyncedAt"] is None
+
+    def test_cannot_sync_someone_elses_course(self, google: FakeGoogle) -> None:
+        owner = auth_headers("owner@example.com")
+        course = create_course_with_topics(owner, "Trees")
+        stranger = auth_headers("stranger@example.com")
+        connect(stranger)
+
+        assert self.sync(stranger, course["id"]).status_code == 403
+
+
 class FakeResponse:
-    def __init__(self, status_code: int, payload: dict[str, Any]) -> None:
+    def __init__(self, status_code: int, payload: dict[str, Any], text: str = "") -> None:
         self.status_code = status_code
         self._payload = payload
+        self.text = text
 
     def json(self) -> dict[str, Any]:
         return self._payload
@@ -245,3 +406,59 @@ class TestGoogleClient:
         monkeypatch.setattr(google_calendar.httpx, "request", lambda *a, **k: FakeResponse(404, {}))
 
         google_calendar.delete_calendar("token", "cal-gone")
+
+    def test_batches_are_capped_at_fifty_and_each_part_is_checked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sent: list[bytes] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> FakeResponse:
+            sent.append(kwargs["content"])
+            parts = kwargs["content"].count(b"Content-Type: application/http")
+            return FakeResponse(200, {}, text="HTTP/1.1 200 OK\r\n" * parts)
+
+        monkeypatch.setattr(google_calendar.httpx, "request", fake_request)
+
+        google_calendar.insert_events("token", "cal-1", [{"summary": f"e{i}"} for i in range(120)])
+
+        assert len(sent) == 3
+        assert sent[0].count(b"POST /calendar/v3/calendars/cal-1/events") == 50
+        assert sent[2].count(b"POST /calendar/v3/calendars/cal-1/events") == 20
+
+    def test_one_failed_part_fails_the_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            google_calendar.httpx,
+            "request",
+            lambda *a, **k: FakeResponse(200, {}, text="HTTP/1.1 200 OK\r\nHTTP/1.1 403 Forbidden\r\n"),
+        )
+
+        with pytest.raises(google_calendar.GoogleCalendarError, match="would not add"):
+            google_calendar.insert_events("token", "cal-1", [{"summary": "a"}, {"summary": "b"}])
+
+    def test_deleting_events_someone_already_removed_is_fine(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            google_calendar.httpx,
+            "request",
+            lambda *a, **k: FakeResponse(200, {}, text="HTTP/1.1 204 No Content\r\nHTTP/1.1 404 Not Found\r\n"),
+        )
+
+        google_calendar.delete_events("token", "cal-1", ["ev-1", "ev-2"])
+
+    def test_listing_follows_every_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pages = iter(
+            [
+                FakeResponse(200, {"items": [{"id": "a"}, {"id": "b"}], "nextPageToken": "p2"}),
+                FakeResponse(200, {"items": [{"id": "c"}]}),
+            ]
+        )
+        requested_params: list[dict[str, Any]] = []
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> FakeResponse:
+            requested_params.append(kwargs["params"])
+            return next(pages)
+
+        monkeypatch.setattr(google_calendar.httpx, "request", fake_request)
+
+        ids = google_calendar.list_event_ids("token", "cal-1", "learnsprintCourseId=c1")
+
+        assert ids == ["a", "b", "c"]
+        assert requested_params[0]["privateExtendedProperty"] == "learnsprintCourseId=c1"
+        assert requested_params[1]["pageToken"] == "p2"

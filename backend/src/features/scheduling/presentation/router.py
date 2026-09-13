@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from features.academic_profile.infrastructure import repository as course_repo
-from features.scheduling.application import google_calendar_connection
+from features.scheduling.application import google_calendar_connection, sync_google_calendar
 from features.scheduling.application.generate_schedule import (
     CourseNotScheduled,
     build_schedule_for_course,
@@ -170,6 +170,30 @@ def google_calendar_callback(
 def google_calendar_disconnect(user_id: str = Depends(get_current_user_id)) -> Response:
     google_calendar_connection.disconnect(user_id)
     return Response(status_code=204)
+
+
+class GoogleSyncOut(BaseModel):
+    synced: int
+    lastSyncedAt: str
+
+
+@router.post("/integrations/google-calendar/sync", response_model=GoogleSyncOut)
+def google_calendar_sync(courseId: str, user_id: str = Depends(get_current_user_id)) -> GoogleSyncOut:
+    if course_repo.get_membership(user_id, courseId) is None:
+        raise HTTPException(status_code=403, detail="You do not have access to this course")
+
+    try:
+        result = sync_google_calendar.sync_course(user_id, courseId)
+    except CourseNotScheduled as exc:
+        raise HTTPException(
+            status_code=400, detail="Set an exam date for this course to build a schedule"
+        ) from exc
+    except sync_google_calendar.SyncRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GoogleCalendarError as exc:
+        # Includes GoogleReconnectRequired: the message tells the student to connect again.
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return GoogleSyncOut(**result)
 
 
 def _not_configured() -> HTTPException:
