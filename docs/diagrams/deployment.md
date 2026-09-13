@@ -54,7 +54,7 @@ flowchart TB
 
 Every function runs a slim FastAPI app mounting only its own feature's router — six functions, six different code paths, not the same monolith deployed six times. `main.py` (every router mounted) still exists for local development; `backend/src/lambda_handler.py` is the only file that differs between the two, exporting one named handler per function. Nothing in a feature's router, service, or domain code changed for this split — see ADR 0009.
 
-API Gateway matches each of the 30 routes by its exact literal path, so `GET /courses/{id}/schedule` and `GET /courses/{id}/members` route to different functions even though both share the `/courses/{id}/...` shape — no `{proxy+}` wildcard needed.
+API Gateway matches each of the 31 routes by its exact literal path, so `GET /courses/{id}/schedule` and `GET /courses/{id}/members` route to different functions even though both share the `/courses/{id}/...` shape — no `{proxy+}` wildcard needed.
 
 ## Why this shape
 
@@ -69,7 +69,5 @@ API Gateway matches each of the 30 routes by its exact literal path, so `GET /co
 **Uploaded files persist per student**, one bucket with a `{userId}/{courseId}/...` key per file rather than a bucket per user — the isolation is structural through the key prefix, the same principle as DynamoDB's per-user partitions (see [docs/erd.md](../erd.md)), not a per-account bucket count nobody needs. `content_topics` writes the file to S3, then reads it back from there for analysis — not the original request bytes — so what gets analysed is provably what's on record (ADR 0009).
 
 ## Known gaps
-
-**No CI/CD for the backend.** `deploy-frontend.yml` covers the frontend once its secrets are set (see [docs/deployment-setup.md](../deployment-setup.md)); there's no equivalent workflow for the six Lambdas yet, so a backend change still means running the packaging + `aws lambda update-function-code` steps by hand for whichever function(s) changed.
 
 **No event-driven re-analysis.** Uploads are analysed synchronously in the same request that stores them. Re-running analysis on a previously uploaded file without re-uploading it isn't a feature yet — considered and deliberately not built in ADR 0009, since it would need the frontend to poll or subscribe for an async result for a requirement that only asked for storage and use.
