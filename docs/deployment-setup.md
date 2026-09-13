@@ -12,7 +12,7 @@
 | S3 (frontend) | `learnsprint-frontend-835505308330` |
 | S3 (uploads) | `learnsprint-uploads-835505308330` — one key per file, under `{userId}/{courseId}/...` |
 | CloudFront | `E2GSBED87C32YJ` |
-| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint (+7 for the Calendar: the all-courses plan and Google Calendar sync — see below) |
+| API Gateway | `smart-study-planner-api` (`j6ltiaailc`) — reused from the previous project, see ADR 0008; 31 exact routes, one per endpoint, plus the ones added since (7 for the Calendar and Google sync, 6 for subtasks and materials — see below) |
 | CI role | `learnsprint-github-actions` — scoped to this repo only, see below |
 
 ## One remaining step: add the GitHub secrets
@@ -107,6 +107,18 @@ DELETE /integrations/google-calendar/connection
 ```
 `POST /integrations/google-calendar/sync` takes an optional `courseId` query parameter; without it every course with a plan is synced.
 Nothing changes on the frontend side — the backend builds the Google authorize URL, so the client id and secret never reach the browser and no new `VITE_` variable is needed.
+
+## Subtasks and materials (FR2.3, FR2.9) — routes only
+
+The task model (ADR 0012) adds six exact routes, all pointing at the existing `learnsprint-content-topics` integration (copy its id from the `POST /courses/{course_id}/topics` route). No new function, variable or bucket: materials use the existing uploads bucket, and download links are presigned by the Lambda's own role, which already has `s3:GetObject` on it.
+```
+POST   /courses/{course_id}/topics/{topic_id}/actions
+DELETE /courses/{course_id}/topics/{topic_id}/actions/{action_id}
+POST   /courses/{course_id}/topics/{topic_id}/materials
+GET    /courses/{course_id}/topics/{topic_id}/materials
+GET    /courses/{course_id}/topics/{topic_id}/materials/{material_id}/download
+DELETE /courses/{course_id}/topics/{topic_id}/materials/{material_id}
+```
 
 ## Workflows
 
