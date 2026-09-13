@@ -61,6 +61,7 @@ def summarise_peer(
             total_actions=len(action_ids),
             mastery_level=progress.get("masteryLevel"),
             current_status=progress.get("status", status_rules.BACKLOG),
+            manual_override=bool(progress.get("statusOverride")),
         )
         if status == status_rules.DONE:
             done += 1
