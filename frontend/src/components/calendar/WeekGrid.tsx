@@ -39,12 +39,15 @@ export function WeekGrid({
   blocks,
   range,
   today,
+  showCourse = false,
   onSelectBlock,
 }: {
   weekStart: Date
   blocks: ScheduleBlock[]
   range: HourRange
   today: Date
+  /** Label each session with its course - on when several courses share the grid. */
+  showCourse?: boolean
   onSelectBlock: (block: ScheduleBlock) => void
 }) {
   const days = weekDays(weekStart)
@@ -117,18 +120,24 @@ export function WeekGrid({
 
               {layoutDay(blocksOnDay(blocks, day), range).map(({ block, spot, style }, index) => {
                 const timeRange = `${formatTime(block.start)}–${formatTime(block.end)}`
+                const courseLabel = showCourse ? block.courseName : null
                 const className = cn(
                   'absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-1.5 py-0.5 text-left text-[11px] leading-tight',
                   BLOCK_STYLES[block.blockType],
                 )
+                // A session shows as much as its height allows: label, then its course, then its times.
                 const content = (
                   <>
                     <span className="block truncate font-medium">{block.label}</span>
-                    {spot.height >= 45 && (
+                    {courseLabel && spot.height >= 45 && (
+                      <span className="block truncate text-[10px] opacity-70">{courseLabel}</span>
+                    )}
+                    {spot.height >= (courseLabel ? 70 : 45) && (
                       <span className="block truncate opacity-70">{timeRange}</span>
                     )}
                   </>
                 )
+                const description = [block.label, courseLabel, timeRange].filter(Boolean).join(', ')
 
                 // Study-aid blocks belong to no topic, so there is nothing to open.
                 return block.topicId ? (
@@ -136,7 +145,7 @@ export function WeekGrid({
                     key={`${block.start}-${index}`}
                     type="button"
                     onClick={() => onSelectBlock(block)}
-                    aria-label={`${block.label}, ${timeRange}`}
+                    aria-label={description}
                     className={cn(className, 'cursor-pointer')}
                     style={style}
                   >
@@ -147,7 +156,7 @@ export function WeekGrid({
                     key={`${block.start}-${index}`}
                     className={className}
                     style={style}
-                    title={timeRange}
+                    title={description}
                   >
                     {content}
                   </div>

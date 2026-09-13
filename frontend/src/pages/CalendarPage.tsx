@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ChevronLeft, ChevronRight, Download, Zap } from 'lucide-react'
 import { api } from '../api/client'
-import type { Board, Course, Schedule, ScheduleBlock } from '../types'
+import type { Board, Course, ScheduleBlock } from '../types'
 import {
   Badge,
   Button,
@@ -30,9 +30,28 @@ import {
 
 type CalendarView = 'week' | 'month'
 
+/** How one course fared in the plan - what the warning banners are built from. */
+interface CourseOutcome {
+  courseId: string
+  courseName: string
+  feasible: boolean
+  isEmergencyMode: boolean
+  reason: string | null
+  shortfallMinutes: number
+}
+
+/** The plan as shown: every course, or one course's slice of the same plan. */
+interface PlanView {
+  blocks: ScheduleBlock[]
+  totalAvailableMinutes: number
+  totalNeededMinutes: number
+  courses: CourseOutcome[]
+}
+
 /**
  * The Calendar (FR6.1): the generated schedule on a weekly time grid, with a
- * month overview.
+ * month overview. All courses by default - one combined plan (FR3.1) - or
+ * filtered to a single course, which is a slice of that same plan.
  *
  * Purely a view of what the backend already computed - no scheduling logic
  * here. The schedule is recomputed on each load rather than stored (ADR 0005).
@@ -41,8 +60,9 @@ type CalendarView = 'week' | 'month'
  */
 export function CalendarPage() {
   const [courses, setCourses] = useState<Course[]>([])
+  // '' means every course - the default.
   const [courseId, setCourseId] = useState('')
-  const [schedule, setSchedule] = useState<Schedule | null>(null)
+  const [plan, setPlan] = useState<PlanView | null>(null)
   const [board, setBoard] = useState<Board | null>(null)
   const [view, setView] = useState<CalendarView>('week')
   // The day in focus: the week view shows its week, the month view its month.
@@ -55,23 +75,51 @@ export function CalendarPage() {
   const [isExporting, setIsExporting] = useState(false)
 
   const today = useMemo(() => new Date(), [])
+  const showingAll = courseId === ''
 
   const loadPlan = useCallback(async () => {
-    if (!courseId) {
-      setSchedule(null)
-      setBoard(null)
-      return
-    }
     try {
-      const [loadedSchedule, loadedBoard] = await Promise.all([
-        api.getSchedule(courseId),
-        api.getBoard(courseId),
-      ])
-      setSchedule(loadedSchedule)
-      setBoard(loadedBoard)
+      if (courseId === '') {
+        const [loaded, loadedBoard] = await Promise.all([api.getStudentPlan(), api.getBoard()])
+        setPlan({
+          blocks: loaded.blocks,
+          totalAvailableMinutes: loaded.totalAvailableMinutes,
+          totalNeededMinutes: loaded.totalNeededMinutes,
+          courses: loaded.courses.map((course) => ({
+            courseId: course.courseId,
+            courseName: course.courseName,
+            feasible: course.feasible,
+            isEmergencyMode: course.isEmergencyMode,
+            reason: course.reason ?? null,
+            shortfallMinutes: course.shortfallMinutes ?? 0,
+          })),
+        })
+        setBoard(loadedBoard)
+      } else {
+        const [loaded, loadedBoard] = await Promise.all([
+          api.getSchedule(courseId),
+          api.getBoard(courseId),
+        ])
+        setPlan({
+          blocks: loaded.blocks,
+          totalAvailableMinutes: loaded.totalAvailableMinutes,
+          totalNeededMinutes: loaded.totalNeededMinutes,
+          courses: [
+            {
+              courseId,
+              courseName: loaded.blocks[0]?.courseName ?? '',
+              feasible: loaded.feasible,
+              isEmergencyMode: loaded.isEmergencyMode,
+              reason: loaded.reason ?? null,
+              shortfallMinutes: loaded.shortfallMinutes ?? 0,
+            },
+          ],
+        })
+        setBoard(loadedBoard)
+      }
       setError('')
     } catch (caught) {
-      setSchedule(null)
+      setPlan(null)
       setBoard(null)
       setError(caught instanceof Error ? caught.message : 'Could not load the plan')
     }
@@ -80,12 +128,7 @@ export function CalendarPage() {
   useEffect(() => {
     api
       .listCourses()
-      .then((loaded) => {
-        setCourses(loaded)
-        // Default to the first course that actually has an exam to plan for.
-        const schedulable = loaded.find((course) => course.examDate)
-        if (schedulable) setCourseId(schedulable.id)
-      })
+      .then(setCourses)
       .catch((caught) => setError(caught.message))
       .finally(() => setIsLoading(false))
   }, [])
@@ -95,27 +138,29 @@ export function CalendarPage() {
     loadPlan()
   }, [loadPlan])
 
-  // Land where the plan is, but only once per course - a reload after ticking
+  // Land where the plan is, but only once per filter - a reload after ticking
   // an action must not yank the user back.
   useEffect(() => {
-    if (schedule && cursor === null) {
-      setCursor(initialCursorFor(schedule.blocks, today))
+    if (plan && cursor === null) {
+      setCursor(initialCursorFor(plan.blocks, today))
     }
-  }, [schedule, cursor, today])
+  }, [plan, cursor, today])
 
   const cardsByTopic = useMemo(
     () => new Map((board?.cards ?? []).map((card) => [card.topicId, card])),
     [board],
   )
-  const range = useMemo(() => hourRange(schedule?.blocks ?? []), [schedule])
+  const range = useMemo(() => hourRange(plan?.blocks ?? []), [plan])
 
   async function handleExport() {
-    const course = courses.find((item) => item.id === courseId)
-    if (!course) return
-
     setIsExporting(true)
     try {
-      await api.downloadScheduleIcs(course.id, course.name)
+      if (showingAll) {
+        await api.downloadStudentPlanIcs()
+      } else {
+        const course = courses.find((item) => item.id === courseId)
+        if (course) await api.downloadScheduleIcs(course.id, course.name)
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not export the plan')
     } finally {
@@ -141,13 +186,17 @@ export function CalendarPage() {
 
   if (isLoading) return <Spinner label="Loading calendar" />
 
-  const hasPlan = Boolean(schedule?.feasible && schedule.blocks.length > 0)
+  const hasPlan = Boolean(plan && plan.blocks.length > 0)
+  const hasCourses = Boolean(plan && plan.courses.length > 0)
+  // A course whose plan is fine needs no banner; the others are named so the
+  // student knows which exam is the problem.
+  const troubled = (plan?.courses ?? []).filter((course) => !course.feasible || course.isEmergencyMode)
 
   return (
     <>
       <PageHeader
         title="Calendar"
-        subtitle="Your study sessions, week by week - planned around your blocked hours, the exam date, and how well you know each topic."
+        subtitle="Your study sessions, week by week - planned around your blocked hours, the exam dates, and how well you know each topic."
         action={
           <div className="flex items-center gap-2">
             {hasPlan && (
@@ -160,9 +209,9 @@ export function CalendarPage() {
               value={courseId}
               onChange={(event) => setCourseId(event.target.value)}
               className="w-52"
-              aria-label="Choose a course"
+              aria-label="Filter by course"
             >
-              <option value="">Choose a course</option>
+              <option value="">All courses</option>
               {courses.map((course) => (
                 <option key={course.id} value={course.id}>
                   {course.name}
@@ -175,62 +224,78 @@ export function CalendarPage() {
 
       {error && <ErrorNote message={error} />}
 
-      {schedule && !schedule.feasible && (
-        <Card className="mb-6 border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950">
-          <div className="flex gap-3">
-            <AlertTriangle className="size-5 shrink-0 text-amber-600" aria-hidden />
-            <div>
-              <p className="font-medium text-amber-900 dark:text-amber-200">
-                This plan doesn't fit
-              </p>
-              <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">{schedule.reason}</p>
-              <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">
-                You need about {formatMinutes(schedule.shortfallMinutes ?? 0)} more free time.
-                Try freeing up some blocked hours in your profile.
-              </p>
+      {troubled.map((course) =>
+        !course.feasible ? (
+          <Card
+            key={course.courseId}
+            className="mb-6 border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950"
+          >
+            <div className="flex gap-3">
+              <AlertTriangle className="size-5 shrink-0 text-amber-600" aria-hidden />
+              <div>
+                <p className="font-medium text-amber-900 dark:text-amber-200">
+                  {showingAll ? `${course.courseName}: this plan doesn't fit` : "This plan doesn't fit"}
+                </p>
+                <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">{course.reason}</p>
+                <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">
+                  You need about {formatMinutes(course.shortfallMinutes)} more free time
+                  {showingAll ? ' before this exam' : ''}. Try freeing up some blocked hours in
+                  your profile.
+                </p>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        ) : (
+          <Card
+            key={course.courseId}
+            className="mb-6 border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
+          >
+            <div className="flex gap-3">
+              <Zap className="size-5 shrink-0 text-red-600" aria-hidden />
+              <div>
+                <p className="font-medium text-red-900 dark:text-red-200">
+                  {showingAll ? `${course.courseName}: emergency mode` : 'Emergency mode'}
+                </p>
+                <p className="mt-1 text-sm text-red-800 dark:text-red-300">
+                  There isn't time for the full read-summarize-quiz cycle, so the plan is one
+                  condensed review session with equal time per topic.
+                </p>
+              </div>
+            </div>
+          </Card>
+        ),
       )}
 
-      {schedule?.isEmergencyMode && (
-        <Card className="mb-6 border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950">
-          <div className="flex gap-3">
-            <Zap className="size-5 shrink-0 text-red-600" aria-hidden />
-            <div>
-              <p className="font-medium text-red-900 dark:text-red-200">Emergency mode</p>
-              <p className="mt-1 text-sm text-red-800 dark:text-red-300">
-                There isn't time for the full read-summarize-quiz cycle, so the plan is one
-                condensed review session with equal time per topic.
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {schedule?.feasible && (
+      {plan && hasCourses && (
         <div className="mb-6 grid gap-3 sm:grid-cols-3">
-          <Stat label="Free time before exam" value={formatMinutes(schedule.totalAvailableMinutes)} />
-          <Stat label="Study time planned" value={formatMinutes(schedule.totalNeededMinutes)} />
-          <Stat label="Sessions" value={String(schedule.blocks.length)} />
+          <Stat
+            label={showingAll ? 'Free time until your last exam' : 'Free time before exam'}
+            value={formatMinutes(plan.totalAvailableMinutes)}
+          />
+          <Stat label="Study time planned" value={formatMinutes(plan.totalNeededMinutes)} />
+          <Stat label="Sessions" value={String(plan.blocks.length)} />
         </div>
       )}
 
       <GoogleCalendarControls courseId={courseId} canSync={hasPlan} />
 
-      {!courseId ? (
+      {plan && !hasCourses ? (
         <EmptyState
-          title="Pick a course"
-          description="Choose a course with an exam date and its study plan will appear here."
+          title="No study plan yet"
+          description="Set an exam date on a course and its sessions will appear here, planned around your blocked hours."
         />
-      ) : !hasPlan && !error && schedule?.feasible ? (
+      ) : plan && !hasPlan && troubled.length === 0 ? (
         <EmptyState
           title="Nothing scheduled"
-          description="Add topics to this course, then the plan will fill in around your blocked hours."
+          description={
+            showingAll
+              ? 'Add topics to your courses, then the plan will fill in around your blocked hours.'
+              : 'Add topics to this course, then the plan will fill in around your blocked hours.'
+          }
         />
       ) : (
         hasPlan &&
-        schedule &&
+        plan &&
         cursor && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -284,16 +349,18 @@ export function CalendarPage() {
             {view === 'week' ? (
               <WeekGrid
                 weekStart={startOfWeek(cursor)}
-                blocks={schedule.blocks}
+                blocks={plan.blocks}
                 range={range}
                 today={today}
+                showCourse={showingAll}
                 onSelectBlock={handleSelectBlock}
               />
             ) : (
               <MonthGrid
                 month={startOfMonth(cursor)}
-                blocks={schedule.blocks}
+                blocks={plan.blocks}
                 today={today}
+                showCourse={showingAll}
                 onSelectDay={showDayInWeek}
               />
             )}

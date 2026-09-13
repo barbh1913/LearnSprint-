@@ -48,7 +48,13 @@ describe('GoogleCalendarControls', () => {
       }),
       'POST /integrations/google-calendar/sync?courseId=c1': () => {
         lastSyncedAt = '2026-09-16T12:30:00'
-        return { body: { synced: 7, lastSyncedAt } }
+        return {
+          body: {
+            synced: 7,
+            lastSyncedAt,
+            courses: [{ courseId: 'c1', courseName: 'Data Structures', synced: 7, skipped: null }],
+          },
+        }
       },
     })
 
@@ -59,6 +65,32 @@ describe('GoogleCalendarControls', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('7 sessions are now in your Google Calendar.')
     expect(await screen.findByText(/Last synced/)).toBeInTheDocument()
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1)
+  })
+
+  it('syncs every course when the calendar shows all courses, and says what was skipped', async () => {
+    const calls = mockApi({
+      'GET /integrations/google-calendar/status': () => ({
+        body: { configured: true, connected: true, connectedAt: '2026-09-16T10:00:00', lastSyncedAt: null },
+      }),
+      'POST /integrations/google-calendar/sync': () => ({
+        body: {
+          synced: 9,
+          lastSyncedAt: '2026-09-16T12:30:00',
+          courses: [
+            { courseId: 'c1', courseName: 'Data Structures', synced: 9, skipped: null },
+            { courseId: 'c2', courseName: 'OOP', synced: 0, skipped: "This plan doesn't fit" },
+          ],
+        },
+      }),
+    })
+
+    render(<GoogleCalendarControls courseId="" canSync />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }))
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('9 sessions are now in your Google Calendar.')
+    expect(notice).toHaveTextContent("Skipped OOP (This plan doesn't fit).")
+    expect(calls.some((call) => call.method === 'POST' && call.path === '/integrations/google-calendar/sync')).toBe(true)
   })
 
   it('will not offer to sync a plan that does not fit', async () => {

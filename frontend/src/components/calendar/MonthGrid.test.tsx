@@ -17,6 +17,8 @@ function block(start: string, label: string): ScheduleBlock {
     actionType: 'read',
     actionId: 'a1',
     label,
+    courseId: 'c1',
+    courseName: 'Data Structures',
   }
 }
 
@@ -43,6 +45,15 @@ describe('MonthGrid', () => {
     expect(screen.getByText('Quiz: Trees')).toBeInTheDocument()
     expect(screen.queryByText('Read: Graphs')).not.toBeInTheDocument()
     expect(screen.getByText('+1 more')).toBeInTheDocument()
+  })
+
+  it('prefixes chips with the course when several courses share the grid', () => {
+    const blocks = [block('2026-09-14T18:00:00', 'Read: Trees')]
+
+    render(<MonthGrid month={september} blocks={blocks} today={today} showCourse onSelectDay={vi.fn()} />)
+
+    expect(screen.getByText('Data Structures ·')).toBeInTheDocument()
+    expect(screen.getByTitle('Data Structures · Read: Trees')).toBeInTheDocument()
   })
 
   it('hands the clicked day back', () => {

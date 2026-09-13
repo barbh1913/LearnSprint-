@@ -19,11 +19,14 @@ export function MonthGrid({
   month,
   blocks,
   today,
+  showCourse = false,
   onSelectDay,
 }: {
   month: Date
   blocks: ScheduleBlock[]
   today: Date
+  /** Prefix each chip with its course - on when several courses share the grid. */
+  showCourse?: boolean
   onSelectDay: (day: Date) => void
 }) {
   const days = monthGrid(month)
@@ -79,7 +82,11 @@ export function MonthGrid({
                       'block truncate rounded px-1.5 py-0.5 text-[11px] leading-tight',
                       CHIP_STYLES[block.blockType],
                     )}
+                    title={showCourse && block.courseName ? `${block.courseName} · ${block.label}` : block.label}
                   >
+                    {showCourse && block.courseName && (
+                      <span className="font-medium">{block.courseName} · </span>
+                    )}
                     {block.label}
                   </span>
                 ))}
