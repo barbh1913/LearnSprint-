@@ -71,3 +71,21 @@ def test_me_with_garbage_token_returns_401() -> None:
     response = client.get("/auth/me", headers={"Authorization": "Bearer not-a-jwt"})
 
     assert response.status_code == 401
+
+
+def test_a_short_password_is_rejected() -> None:
+    # The frontend enforces this with an HTML minLength, which is trivial to
+    # bypass by calling the API directly - the server has to hold the line too.
+    response = client.post(
+        "/auth/register", json={"email": "short@example.com", "password": "abc123"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_an_empty_password_is_rejected() -> None:
+    response = client.post(
+        "/auth/register", json={"email": "empty@example.com", "password": ""}
+    )
+
+    assert response.status_code == 422
