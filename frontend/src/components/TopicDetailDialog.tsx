@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import type { BoardCard, MasteryLevel } from '../types'
 import { ACTION_LABELS, STATUS_LABELS } from '../types'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
-import { Badge, Input } from './ui/primitives'
+import { Badge, ErrorNote, Input } from './ui/primitives'
 import { MasteryPicker } from './MasteryPicker'
 
 /**
@@ -24,41 +24,50 @@ export function TopicDetailDialog({
   onChanged: () => void
 }) {
   const [name, setName] = useState(card?.name ?? '')
+  const [error, setError] = useState('')
 
   useEffect(() => {
     setName(card?.name ?? '')
+    setError('')
   }, [card?.topicId, card?.name])
 
   if (!card) return null
 
-  async function handleRename() {
+  async function runMutation(action: () => Promise<unknown>) {
+    try {
+      await action()
+      setError('')
+      onChanged()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'That change could not be saved')
+    }
+  }
+
+  function handleRename() {
     if (!card || !name.trim() || name === card.name) return
-    await api.updateTopic(card.courseId, card.topicId, { name: name.trim() })
-    onChanged()
+    runMutation(() => api.updateTopic(card.courseId, card.topicId, { name: name.trim() }))
   }
 
-  async function handleTogglePriority() {
+  function handleTogglePriority() {
     if (!card) return
-    await api.updateTopic(card.courseId, card.topicId, { isPriority: !card.isPriority })
-    onChanged()
+    runMutation(() =>
+      api.updateTopic(card.courseId, card.topicId, { isPriority: !card.isPriority }),
+    )
   }
 
-  async function handleToggleAction(actionId: string, isDone: boolean) {
+  function handleToggleAction(actionId: string, isDone: boolean) {
     if (!card) return
-    await api.setActionDone(card.courseId, actionId, isDone)
-    onChanged()
+    runMutation(() => api.setActionDone(card.courseId, actionId, isDone))
   }
 
-  async function handleDuration(actionId: string, minutes: number) {
+  function handleDuration(actionId: string, minutes: number) {
     if (!card || !Number.isFinite(minutes) || minutes < 10 || minutes > 300) return
-    await api.updateAction(card.courseId, card.topicId, actionId, minutes)
-    onChanged()
+    runMutation(() => api.updateAction(card.courseId, card.topicId, actionId, minutes))
   }
 
-  async function handleMastery(level: MasteryLevel) {
+  function handleMastery(level: MasteryLevel) {
     if (!card) return
-    await api.setTopicProgress(card.courseId, card.topicId, { masteryLevel: level })
-    onChanged()
+    runMutation(() => api.setTopicProgress(card.courseId, card.topicId, { masteryLevel: level }))
   }
 
   return (
@@ -102,6 +111,8 @@ export function TopicDetailDialog({
               <span className="text-xs text-muted-foreground">{card.totalMinutes} min total</span>
             </div>
           </div>
+
+          {error && <ErrorNote message={error} />}
 
           <div>
             <h3 className="mb-2 text-sm font-medium">Learning actions</h3>

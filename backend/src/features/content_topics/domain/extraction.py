@@ -76,7 +76,15 @@ def extract_topics(lines: list[str], *, max_topics: int = 40) -> list[ExtractedT
         if key in seen or name in repeated:
             continue
 
-        score = score_line(name)
+        # Numbering/bullets are a strong heading signal, but _clean() above has
+        # already stripped them from `name` - detect them from the raw line
+        # instead, or the bonus below could never fire (see score_line).
+        stripped_raw = raw_line.strip()
+        score = score_line(
+            name,
+            had_numbering=bool(NUMBERING_PATTERN.match(stripped_raw)),
+            had_bullet=bool(BULLET_PATTERN.match(stripped_raw)),
+        )
         if score < MIN_SCORE_TO_ACCEPT:
             continue
 
@@ -91,17 +99,22 @@ def extract_topics(lines: list[str], *, max_topics: int = 40) -> list[ExtractedT
     return topics[:max_topics]
 
 
-def score_line(line: str) -> int:
-    """How much this line looks like a topic heading. Higher is more likely."""
+def score_line(line: str, *, had_numbering: bool = False, had_bullet: bool = False) -> int:
+    """How much this line looks like a topic heading. Higher is more likely.
+
+    `had_numbering`/`had_bullet` let a caller report a prefix it already
+    stripped before calling this (see extract_topics); a line's own leading
+    numbering/bullet is still detected directly when called with raw text.
+    """
     if not _is_plausible_length(line) or NOISE_PATTERN.match(line):
         return 0
 
     score = 0
     word_count = len(line.split())
 
-    if NUMBERING_PATTERN.match(line):
+    if had_numbering or NUMBERING_PATTERN.match(line):
         score += 3
-    if BULLET_PATTERN.match(line):
+    if had_bullet or BULLET_PATTERN.match(line):
         score += 1
 
     # Headings are short phrases; prose runs long.

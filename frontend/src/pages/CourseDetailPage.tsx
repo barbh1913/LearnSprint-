@@ -83,39 +83,50 @@ export function CourseDetailPage() {
     }
   }
 
-  async function handleAddTopic(event: React.FormEvent) {
+  /** Runs a topic/action mutation, surfacing a failure instead of it silently
+   * doing nothing, then reloads the board so derived state (status, progress
+   * bars) stays in sync with what the server actually saved. */
+  async function runMutation(action: () => Promise<unknown>) {
+    try {
+      await action()
+      setError('')
+      await load()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'That change could not be saved')
+    }
+  }
+
+  function handleAddTopic(event: React.FormEvent) {
     event.preventDefault()
-    if (!newTopic.trim()) return
+    const name = newTopic.trim()
+    if (!name) return
 
-    await api.createTopic(courseId, newTopic.trim())
-    setNewTopic('')
-    load()
+    runMutation(async () => {
+      await api.createTopic(courseId, name)
+      setNewTopic('')
+    })
   }
 
-  async function handleRename(card: BoardCard, name: string) {
+  function handleRename(card: BoardCard, name: string) {
     if (!name.trim() || name === card.name) return
-    await api.updateTopic(courseId, card.topicId, { name: name.trim() })
-    load()
+    runMutation(() => api.updateTopic(courseId, card.topicId, { name: name.trim() }))
   }
 
-  async function handleTogglePriority(card: BoardCard) {
-    await api.updateTopic(courseId, card.topicId, { isPriority: !card.isPriority })
-    load()
+  function handleTogglePriority(card: BoardCard) {
+    runMutation(() => api.updateTopic(courseId, card.topicId, { isPriority: !card.isPriority }))
   }
 
-  async function handleDeleteTopic(card: BoardCard) {
-    await api.deleteTopic(courseId, card.topicId)
-    load()
+  function handleDeleteTopic(card: BoardCard) {
+    if (!confirm(`Delete "${card.name}"? This also removes everyone's progress on it.`)) return
+    runMutation(() => api.deleteTopic(courseId, card.topicId))
   }
 
-  async function handleToggleAction(actionId: string, isDone: boolean) {
-    await api.setActionDone(courseId, actionId, isDone)
-    load()
+  function handleToggleAction(actionId: string, isDone: boolean) {
+    runMutation(() => api.setActionDone(courseId, actionId, isDone))
   }
 
-  async function handleMastery(card: BoardCard, level: MasteryLevel) {
-    await api.setTopicProgress(courseId, card.topicId, { masteryLevel: level })
-    load()
+  function handleMastery(card: BoardCard, level: MasteryLevel) {
+    runMutation(() => api.setTopicProgress(courseId, card.topicId, { masteryLevel: level }))
   }
 
   if (isLoading) return <Spinner label="Loading course" />
