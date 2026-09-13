@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ChevronLeft, ChevronRight, Download, Zap } from 'lucide-react'
 import { api } from '../api/client'
-import type { Board, Course, ScheduleBlock } from '../types'
+import type { Board, Course } from '../types'
 import {
   Badge,
   Button,
@@ -19,6 +19,7 @@ import { GoogleCalendarControls } from '../components/calendar/GoogleCalendarCon
 import {
   addDays,
   addMonths,
+  eventToItem,
   formatMonth,
   formatWeekRange,
   hourRange,
@@ -26,6 +27,7 @@ import {
   startOfDay,
   startOfMonth,
   startOfWeek,
+  type CalendarItem,
 } from '../components/calendar/calendarMath'
 
 type CalendarView = 'week' | 'month'
@@ -42,7 +44,8 @@ interface CourseOutcome {
 
 /** The plan as shown: every course, or one course's slice of the same plan. */
 interface PlanView {
-  blocks: ScheduleBlock[]
+  /** Topic events (ADR 0012), already shaped for the grids. */
+  items: CalendarItem[]
   totalAvailableMinutes: number
   totalNeededMinutes: number
   courses: CourseOutcome[]
@@ -67,9 +70,7 @@ export function CalendarPage() {
   const [view, setView] = useState<CalendarView>('week')
   // The day in focus: the week view shows its week, the month view its month.
   const [cursor, setCursor] = useState<Date | null>(null)
-  const [selected, setSelected] = useState<{ topicId: string; actionId: string | null } | null>(
-    null,
-  )
+  const [selected, setSelected] = useState<{ topicId: string; actionIds: string[] } | null>(null)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
@@ -82,7 +83,7 @@ export function CalendarPage() {
       if (courseId === '') {
         const [loaded, loadedBoard] = await Promise.all([api.getStudentPlan(), api.getBoard()])
         setPlan({
-          blocks: loaded.blocks,
+          items: loaded.events.map(eventToItem),
           totalAvailableMinutes: loaded.totalAvailableMinutes,
           totalNeededMinutes: loaded.totalNeededMinutes,
           courses: loaded.courses.map((course) => ({
@@ -101,13 +102,13 @@ export function CalendarPage() {
           api.getBoard(courseId),
         ])
         setPlan({
-          blocks: loaded.blocks,
+          items: loaded.events.map(eventToItem),
           totalAvailableMinutes: loaded.totalAvailableMinutes,
           totalNeededMinutes: loaded.totalNeededMinutes,
           courses: [
             {
               courseId,
-              courseName: loaded.blocks[0]?.courseName ?? '',
+              courseName: loaded.events[0]?.courseName ?? '',
               feasible: loaded.feasible,
               isEmergencyMode: loaded.isEmergencyMode,
               reason: loaded.reason ?? null,
@@ -142,7 +143,7 @@ export function CalendarPage() {
   // an action must not yank the user back.
   useEffect(() => {
     if (plan && cursor === null) {
-      setCursor(initialCursorFor(plan.blocks, today))
+      setCursor(initialCursorFor(plan.items, today))
     }
   }, [plan, cursor, today])
 
@@ -150,7 +151,7 @@ export function CalendarPage() {
     () => new Map((board?.cards ?? []).map((card) => [card.topicId, card])),
     [board],
   )
-  const range = useMemo(() => hourRange(plan?.blocks ?? []), [plan])
+  const range = useMemo(() => hourRange(plan?.items ?? []), [plan])
 
   async function handleExport() {
     setIsExporting(true)
@@ -168,9 +169,9 @@ export function CalendarPage() {
     }
   }
 
-  function handleSelectBlock(block: ScheduleBlock) {
-    if (block.topicId && cardsByTopic.has(block.topicId)) {
-      setSelected({ topicId: block.topicId, actionId: block.actionId })
+  function handleSelectItem(item: CalendarItem) {
+    if (item.topicId && cardsByTopic.has(item.topicId)) {
+      setSelected({ topicId: item.topicId, actionIds: item.actionIds })
     }
   }
 
@@ -186,7 +187,7 @@ export function CalendarPage() {
 
   if (isLoading) return <Spinner label="Loading calendar" />
 
-  const hasPlan = Boolean(plan && plan.blocks.length > 0)
+  const hasPlan = Boolean(plan && plan.items.length > 0)
   const hasCourses = Boolean(plan && plan.courses.length > 0)
   // A course whose plan is fine needs no banner; the others are named so the
   // student knows which exam is the problem.
@@ -273,7 +274,7 @@ export function CalendarPage() {
             value={formatMinutes(plan.totalAvailableMinutes)}
           />
           <Stat label="Study time planned" value={formatMinutes(plan.totalNeededMinutes)} />
-          <Stat label="Sessions" value={String(plan.blocks.length)} />
+          <Stat label="Sessions" value={String(plan.items.length)} />
         </div>
       )}
 
@@ -326,7 +327,7 @@ export function CalendarPage() {
 
               <div className="flex items-center gap-3">
                 <div className="hidden items-center gap-2 sm:flex">
-                  <Badge tone="success">Action</Badge>
+                  <Badge tone="success">Study</Badge>
                   <Badge tone="accent">Review</Badge>
                   <Badge tone="warning">Study aids</Badge>
                 </div>
@@ -349,16 +350,16 @@ export function CalendarPage() {
             {view === 'week' ? (
               <WeekGrid
                 weekStart={startOfWeek(cursor)}
-                blocks={plan.blocks}
+                items={plan.items}
                 range={range}
                 today={today}
                 showCourse={showingAll}
-                onSelectBlock={handleSelectBlock}
+                onSelectItem={handleSelectItem}
               />
             ) : (
               <MonthGrid
                 month={startOfMonth(cursor)}
-                blocks={plan.blocks}
+                items={plan.items}
                 today={today}
                 showCourse={showingAll}
                 onSelectDay={showDayInWeek}
@@ -370,7 +371,7 @@ export function CalendarPage() {
 
       <TopicDetailDialog
         card={selected ? (cardsByTopic.get(selected.topicId) ?? null) : null}
-        highlightActionId={selected?.actionId ?? null}
+        highlightActionIds={selected?.actionIds ?? []}
         onClose={() => setSelected(null)}
         onChanged={loadPlan}
       />

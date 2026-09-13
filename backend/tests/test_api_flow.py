@@ -427,7 +427,9 @@ class TestTopicsAndBoard:
         ).json()
 
         assert updated["name"] == "New name"
+        # The old boolean still works and reads back as the "high" level (ADR 0012).
         assert updated["isPriority"] is True
+        assert updated["priority"] == "high"
 
     def test_editing_an_action_s_time_estimate(self) -> None:
         headers = auth_headers()

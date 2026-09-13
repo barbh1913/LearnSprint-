@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Star } from 'lucide-react'
 import { api } from '../api/client'
 import type { Board, BoardCard, Course, Sprint, TopicStatus } from '../types'
-import { ACTION_LABELS, STATUS_LABELS, STATUS_ORDER } from '../types'
+import { STATUS_LABELS, STATUS_ORDER } from '../types'
 import { SprintHeader } from '../components/SprintHeader'
 import { TopicDetailDialog } from '../components/TopicDetailDialog'
 import {
@@ -200,25 +200,45 @@ function TopicCard({
   onOpen: () => void
   isDragging: boolean
 }) {
+  // A card is both draggable (to change status) and clickable (to open). A
+  // drag that starts on the card must not also count as a click.
+  const isDragInProgress = useRef(false)
+
   return (
     <article
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${card.name}`}
       draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onDragStart={() => {
+        isDragInProgress.current = true
+        onDragStart()
+      }}
+      onDragEnd={() => {
+        onDragEnd()
+        // Let any click the browser fires for the same gesture pass first.
+        setTimeout(() => {
+          isDragInProgress.current = false
+        }, 0)
+      }}
+      onClick={() => {
+        if (!isDragInProgress.current) onOpen()
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
       className={cn(
-        'cursor-grab rounded-lg border border-border bg-card p-3 active:cursor-grabbing',
+        'cursor-pointer rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/50 focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing',
         isDragging && 'opacity-40',
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <button
-          onClick={onOpen}
-          className="text-left text-sm font-medium leading-snug hover:text-primary hover:underline"
-        >
-          {card.name}
-        </button>
-        {card.isPriority && (
-          <Star className="size-3.5 shrink-0 text-amber-500" fill="currentColor" aria-label="Core topic" />
+        <span className="text-sm font-medium leading-snug">{card.name}</span>
+        {card.priority === 'high' && (
+          <Star className="size-3.5 shrink-0 text-amber-500" fill="currentColor" aria-label="High priority" />
         )}
       </div>
 
@@ -232,17 +252,18 @@ function TopicCard({
         {card.actions.map((action) => (
           <span
             key={action.id}
-            title={ACTION_LABELS[action.type]}
+            title={action.title}
             className={cn(
-              'rounded px-1.5 py-0.5 text-[10px] font-medium',
+              'max-w-32 truncate rounded px-1.5 py-0.5 text-[10px] font-medium',
               action.isDone
                 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                 : 'bg-muted text-muted-foreground',
             )}
           >
-            {ACTION_LABELS[action.type]}
+            {action.title}
           </span>
         ))}
+        {card.priority === 'low' && <Badge tone="neutral">Low priority</Badge>}
       </div>
 
       {card.needsMasteryRating && (

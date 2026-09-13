@@ -44,3 +44,16 @@ def get_object(key: str) -> bytes:
 
 def delete_object(key: str) -> None:
     get_client().delete_object(Bucket=BUCKET, Key=key)
+
+
+def presigned_get_url(key: str, *, file_name: str, expires_in: int) -> str:
+    """A time-limited link to one object. The bucket stays private; the link is the permission."""
+    return get_client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": BUCKET,
+            "Key": key,
+            "ResponseContentDisposition": f'attachment; filename="{file_name}"',
+        },
+        ExpiresIn=expires_in,
+    )

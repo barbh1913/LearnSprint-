@@ -1,17 +1,19 @@
 """Turn a generated schedule into Google Calendar event payloads (FR6.2, ADR 0010).
 
-Pure data shaping, no I/O - the sibling of calendar_export.py. Times go out as
-the scheduler's naive wall-clock values with an explicit zone attached, which
-is the same "floating time" the .ics export uses, made explicit because
-Google's API insists on knowing whose clock it is.
+Pure data shaping, no I/O - the sibling of calendar_export.py, and it writes
+the same topic-level events (ADR 0012). Times go out as the scheduler's naive
+wall-clock values with an explicit zone attached, which is the same "floating
+time" the .ics export uses, made explicit because Google's API insists on
+knowing whose clock it is.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from features.scheduling.domain.calendar_export import BLOCK_DESCRIPTIONS
+from features.scheduling.domain.calendar_export import event_description, event_summary
 from features.scheduling.domain.models import Schedule
+from features.scheduling.domain.topic_events import group_blocks_into_topic_events
 
 # Private extended properties are how a sync finds the events it wrote last
 # time: every LearnSprint event carries the course it came from, so re-syncing
@@ -24,13 +26,13 @@ def schedule_to_google_events(
 ) -> list[dict[str, Any]]:
     return [
         {
-            "summary": block.label,
-            "description": f"{BLOCK_DESCRIPTIONS[block.block_type]}\n{course_name}",
-            "start": {"dateTime": block.start.isoformat(timespec="seconds"), "timeZone": time_zone},
-            "end": {"dateTime": block.end.isoformat(timespec="seconds"), "timeZone": time_zone},
+            "summary": event_summary(event),
+            "description": event_description(event, course_name),
+            "start": {"dateTime": event.start.isoformat(timespec="seconds"), "timeZone": time_zone},
+            "end": {"dateTime": event.end.isoformat(timespec="seconds"), "timeZone": time_zone},
             "extendedProperties": {"private": {COURSE_PROPERTY: course_id}},
         }
-        for block in schedule.blocks
+        for event in group_blocks_into_topic_events(schedule.blocks)
     ]
 
 

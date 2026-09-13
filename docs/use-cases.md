@@ -137,6 +137,7 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 **Alternative flows:**
 - *Student drags a card manually* — the manual status wins until real progress (a completed action or a new rating) recomputes it. Dragging is for planning, not for marking work done that wasn't.
 - *Student re-rates a topic downward* — it returns to Needs review, and the next generated plan gives it more time.
+- *Student opens a card* — the topic's detail view (the same one the Calendar opens from an event) shows its description, status, priority, estimated time, assignee, subtasks and attached materials. Editing there follows the same rules: a manual status change is an override, a topic-level time estimate is split across the subtasks in proportion, and adding or deleting a subtask changes the shared topic for the whole group (FR2.3, FR5.2).
 
 **Postcondition:** the board reflects reality, and the mastery ratings feed straight back into UC7's review split.
 

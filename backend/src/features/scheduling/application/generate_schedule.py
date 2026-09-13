@@ -157,6 +157,7 @@ def _schedule_course(
                     topic_id=topic["id"],
                     action_type=ActionType(action["type"]),
                     duration_minutes=int(action.get("defaultDurationMinutes", 30)),
+                    title=action["title"],
                 )
                 # Only what's left to do gets scheduled.
                 for action in actions_by_topic.get(topic["id"], [])

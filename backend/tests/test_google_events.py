@@ -16,6 +16,7 @@ def make_block(block_type: BlockType = BlockType.ACTION, label: str = "Read: Tre
         action_type=ActionType.READ if block_type == BlockType.ACTION else None,
         label=label,
         action_id="a1" if block_type == BlockType.ACTION else None,
+        action_title="Read" if block_type == BlockType.ACTION else None,
     )
 
 
@@ -30,7 +31,8 @@ def test_times_are_wall_clock_with_an_explicit_zone() -> None:
 
     assert event["start"] == {"dateTime": "2026-09-10T18:00:00", "timeZone": "Asia/Jerusalem"}
     assert event["end"] == {"dateTime": "2026-09-10T19:30:00", "timeZone": "Asia/Jerusalem"}
-    assert event["summary"] == "Read: Trees"
+    assert event["summary"] == "Study: Trees"
+    assert "Read (90 min)" in event["description"]
 
 
 def test_every_event_is_tagged_with_its_course() -> None:

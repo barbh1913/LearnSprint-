@@ -18,6 +18,8 @@ erDiagram
     COURSE ||--o{ COURSE_MEMBERSHIP : "shared via"
     COURSE ||--o{ TOPIC : "contains"
     TOPIC ||--o{ LEARNING_ACTION : "divided into"
+    TOPIC ||--o{ MATERIAL : "holds"
+    USER ||--o{ MATERIAL : "uploads"
     TOPIC ||--o{ USER_TOPIC_PROGRESS : "tracked by"
     LEARNING_ACTION ||--o{ USER_ACTION_PROGRESS : "tracked by"
 
@@ -46,13 +48,27 @@ erDiagram
         string id PK
         string courseId FK
         string name
-        bool isPriority
+        string description
+        string priority
     }
     LEARNING_ACTION {
         string id PK
         string topicId FK
         string type
+        string title
+        int order
         int defaultDurationMinutes
+    }
+    MATERIAL {
+        string id PK
+        string userId FK
+        string courseId FK
+        string topicId FK
+        string fileName
+        string s3Key
+        string fileType
+        int sizeBytes
+        string uploadedAt
     }
     USER_TOPIC_PROGRESS {
         string userId FK
@@ -112,6 +128,7 @@ DynamoDB has one table with a composite key (`PK`, `SK`) plus one global seconda
 | Course | `COURSE#<courseId>` | `META` | — | — |
 | Topic | `COURSE#<courseId>` | `TOPIC#<topicId>` | — | — |
 | LearningAction | `COURSE#<courseId>` | `TOPIC#<topicId>#ACTION#<actionId>` | — | — |
+| Material | `COURSE#<courseId>` | `MATERIAL#<materialId>` | — | — |
 
 Two deliberate choices in that layout:
 
@@ -128,6 +145,7 @@ Every query the application makes, and how the keys serve it:
 | Log in by email | GSI1 query on `EMAIL#<email>` — login only knows the email, not the user id |
 | Load my courses | Query `PK=USER#<id>`, `SK` begins with `COURSE#` |
 | Load a course's topics and actions | Query `PK=COURSE#<id>` — returns the whole tree at once |
+| List a topic's materials (FR2.9) | Query `PK=COURSE#<id>`, `SK` begins with `MATERIAL#`, then keep the rows whose `topicId` and `userId` match — the same fetch-then-filter the actions use |
 | Load my progress | Query `PK=USER#<id>`, `SK` begins with `TPROG#` / `APROG#` |
 | List a course's members (FR5.3) | GSI1 query on `COURSE#<id>` — the reverse of the membership record |
 | Compute my weighted average | Query my memberships; course name, credits and semester are denormalised onto each membership record, so no second lookup is needed |
@@ -139,7 +157,9 @@ Every query the application makes, and how the keys serve it:
 
 ## Uploaded material lives in S3, not DynamoDB
 
-Course files a student uploads are stored in a separate bucket (`learnsprint-uploads-835505308330`, deployed - see [ADR 0009](adr/0009-split-into-per-feature-lambdas.md)), one object per file, keyed `{userId}/{courseId}/{uuid}-{filename}`. There is no DynamoDB record of the upload — no key beyond the S3 key itself, since nothing yet needs to list or re-analyse past uploads. The prefix is the same private-per-user pattern as everything else here: a student's files sit under their own `userId`, structurally apart from anyone else's, the same way their `UserTopicProgress` rows do.
+Course files a student uploads are stored in a separate bucket (`learnsprint-uploads-835505308330`, deployed - see [ADR 0009](adr/0009-split-into-per-feature-lambdas.md)), one object per file, keyed `{userId}/{courseId}/{uuid}-{filename}`. The prefix is the same private-per-user pattern as everything else here: a student's files sit under their own `userId`, structurally apart from anyone else's, the same way their `UserTopicProgress` rows do.
+
+Files uploaded for topic extraction (FR2.1) have no DynamoDB record — they are read once and their topics are what persists. Files attached to a topic (FR2.9) do: a `Material` row holds the S3 key, the owner and the topic, so the topic can list them and hand out short-lived download links. Objects never move; a material is deleted by removing both the row and the object.
 
 ## What is *not* stored
 

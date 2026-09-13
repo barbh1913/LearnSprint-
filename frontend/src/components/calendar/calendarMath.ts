@@ -1,13 +1,53 @@
 // Pure date helpers for the Calendar (FR6.1). No React, no API - so the grid's
 // placement rules can be unit-tested without rendering anything.
 //
-// Block times arrive as ISO strings without a zone ("2026-09-10T18:00:00"),
-// which `new Date` reads as local wall-clock time - the same naive-local
-// convention the scheduler and the .ics export use.
+// Times arrive as ISO strings without a zone ("2026-09-10T18:00:00"), which
+// `new Date` reads as local wall-clock time - the same naive-local convention
+// the scheduler and the .ics export use.
 
-import type { ScheduleBlock } from '../../types'
+import type { BlockType, ScheduleEvent } from '../../types'
 
 export const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
+/** What the grids draw: a topic event (ADR 0012) reduced to what a calendar cell needs. */
+export interface CalendarItem {
+  id: string
+  start: string
+  end: string
+  durationMinutes: number
+  kind: BlockType
+  topicId: string | null
+  label: string
+  courseName: string | null
+  actionIds: string[]
+  actionTitles: string[]
+}
+
+const KIND_TO_BLOCK_TYPE: Record<ScheduleEvent['kind'], BlockType> = {
+  study: 'action',
+  review: 'review',
+  study_aid: 'study_aid',
+}
+
+export function eventToItem(event: ScheduleEvent): CalendarItem {
+  return {
+    id: `${event.topicId ?? event.kind}-${event.start}`,
+    start: event.start,
+    end: event.end,
+    durationMinutes: event.durationMinutes,
+    kind: KIND_TO_BLOCK_TYPE[event.kind],
+    topicId: event.topicId,
+    label: event.label,
+    courseName: event.courseName,
+    actionIds: event.actions.map((action) => action.actionId),
+    actionTitles: event.actions.map((action) => action.title),
+  }
+}
+
+interface Timed {
+  start: string
+  end: string
+}
 
 export interface HourRange {
   startHour: number
@@ -47,10 +87,10 @@ export function isSameDay(a: Date, b: Date): boolean {
   )
 }
 
-/** Blocks that start on `day`, earliest first. The scheduler never crosses midnight, so the start is enough. */
-export function blocksOnDay(blocks: ScheduleBlock[], day: Date): ScheduleBlock[] {
-  return blocks
-    .filter((block) => isSameDay(new Date(block.start), day))
+/** Items that start on `day`, earliest first. The scheduler never crosses midnight, so the start is enough. */
+export function itemsOnDay<T extends Timed>(items: T[], day: Date): T[] {
+  return items
+    .filter((item) => isSameDay(new Date(item.start), day))
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
 }
 
@@ -59,48 +99,42 @@ export function minutesIntoDay(iso: string): number {
   return date.getHours() * 60 + date.getMinutes()
 }
 
-/** A block ending exactly at midnight reads as 00:00; treat it as the end of its day. */
-function endMinutesIntoDay(block: ScheduleBlock): number {
-  const end = minutesIntoDay(block.end)
+/** An item ending exactly at midnight reads as 00:00; treat it as the end of its day. */
+function endMinutesIntoDay(item: Timed): number {
+  const end = minutesIntoDay(item.end)
   return end === 0 ? MINUTES_PER_DAY : end
 }
 
 /** The full study day, widened only if a session falls outside it - never narrowed, never hiding one. */
-export function hourRange(
-  blocks: ScheduleBlock[],
-  base: HourRange = DEFAULT_HOUR_RANGE,
-): HourRange {
-  if (blocks.length === 0) return base
+export function hourRange(items: Timed[], base: HourRange = DEFAULT_HOUR_RANGE): HourRange {
+  if (items.length === 0) return base
 
-  const earliest = Math.min(...blocks.map((block) => Math.floor(minutesIntoDay(block.start) / 60)))
-  const latest = Math.max(...blocks.map((block) => Math.ceil(endMinutesIntoDay(block) / 60)))
+  const earliest = Math.min(...items.map((item) => Math.floor(minutesIntoDay(item.start) / 60)))
+  const latest = Math.max(...items.map((item) => Math.ceil(endMinutesIntoDay(item) / 60)))
   return {
     startHour: Math.min(base.startHour, earliest),
     endHour: Math.max(base.endHour, latest),
   }
 }
 
-/** Where a block sits in its day column, in minutes from the top of the visible range. Null if fully outside it. */
-export function placement(
-  block: ScheduleBlock,
-  range: HourRange,
-): { top: number; height: number } | null {
+/** Where an item sits in its day column, in minutes from the top of the visible range. Null if fully outside it. */
+export function placement(item: Timed, range: HourRange): { top: number; height: number } | null {
   const rangeStart = range.startHour * 60
   const rangeEnd = range.endHour * 60
-  const start = Math.max(minutesIntoDay(block.start), rangeStart)
-  const end = Math.min(endMinutesIntoDay(block), rangeEnd)
+  const start = Math.max(minutesIntoDay(item.start), rangeStart)
+  const end = Math.min(endMinutesIntoDay(item), rangeEnd)
   if (end <= start) return null
   return { top: start - rangeStart, height: end - start }
 }
 
 /** The day to open on: today, unless the whole plan lies ahead - then the plan's first day. */
-export function initialCursorFor(blocks: ScheduleBlock[], today: Date): Date {
-  if (blocks.length === 0) return startOfDay(today)
+export function initialCursorFor(items: Timed[], today: Date): Date {
+  if (items.length === 0) return startOfDay(today)
 
-  const firstStart = blocks.reduce((earliest, block) => {
-    const start = new Date(block.start)
+  const firstStart = items.reduce((earliest, item) => {
+    const start = new Date(item.start)
     return start < earliest ? start : earliest
-  }, new Date(blocks[0].start))
+  }, new Date(items[0].start))
 
   const nextWeek = addDays(startOfWeek(today), 7)
   return firstStart >= nextWeek ? startOfDay(firstStart) : startOfDay(today)

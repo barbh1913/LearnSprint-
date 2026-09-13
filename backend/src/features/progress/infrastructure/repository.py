@@ -64,5 +64,10 @@ def set_action_done(user_id: str, action_id: str, topic_id: str, is_done: bool) 
 def delete_topic_progress(user_id: str, topic_id: str, action_ids: list[str]) -> None:
     """Clean up a user's rows when a shared topic is deleted."""
     dynamo.delete_item(dynamo.user_pk(user_id), f"{TOPIC_PROGRESS_PREFIX}{topic_id}")
+    delete_action_progress(user_id, action_ids)
+
+
+def delete_action_progress(user_id: str, action_ids: list[str]) -> None:
+    """Clean up a user's rows when shared subtasks are deleted (FR2.3)."""
     for action_id in action_ids:
         dynamo.delete_item(dynamo.user_pk(user_id), f"{ACTION_PROGRESS_PREFIX}{action_id}")

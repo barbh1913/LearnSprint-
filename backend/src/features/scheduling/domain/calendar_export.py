@@ -3,6 +3,7 @@
 Exporting a standard .ics rather than talking to the Google Calendar API
 directly means the plan imports into Google Calendar, Apple Calendar and
 Outlook alike, with no OAuth consent flow and no third-party account linking.
+(Google sync exists too - ADR 0010 - and writes the same topic events.)
 
 Pure string building - no I/O, so it's straightforward to test.
 """
@@ -11,16 +12,37 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from features.scheduling.domain.models import BlockType, Schedule
+from features.scheduling.domain.models import Schedule
+from features.scheduling.domain.topic_events import (
+    REVIEW,
+    STUDY,
+    STUDY_AID,
+    TopicEvent,
+    group_blocks_into_topic_events,
+)
 
 # RFC 5545 wants CRLF line endings.
 LINE_END = "\r\n"
 
-BLOCK_DESCRIPTIONS = {
-    BlockType.ACTION: "Learning action from your LearnSprint plan",
-    BlockType.REVIEW: "Review session - time weighted by how well you know this topic",
-    BlockType.STUDY_AID: "Prepare your open-material folder or formula sheet",
+KIND_DESCRIPTIONS = {
+    STUDY: "Study session from your LearnSprint plan",
+    REVIEW: "Review session - time weighted by how well you know this topic",
+    STUDY_AID: "Prepare your open-material folder or formula sheet",
 }
+
+
+def event_summary(event: TopicEvent) -> str:
+    """What the calendar entry is called: a study session names its topic explicitly."""
+    return f"Study: {event.label}" if event.kind == STUDY else event.label
+
+
+def event_description(event: TopicEvent, course_name: str) -> str:
+    """The kind of session, its subtasks with their minutes, and the course."""
+    lines = [KIND_DESCRIPTIONS[event.kind]]
+    if event.actions:
+        lines.append(", ".join(f"{action.title} ({action.minutes} min)" for action in event.actions))
+    lines.append(course_name)
+    return "\n".join(lines)
 
 
 def schedule_to_ics(schedule: Schedule, *, course_name: str) -> str:
@@ -31,8 +53,8 @@ def schedule_to_ics(schedule: Schedule, *, course_name: str) -> str:
 def plan_to_ics(named_schedules: list[tuple[str, Schedule]], *, calendar_name: str) -> str:
     """Render several courses' schedules as one iCalendar document, in time order.
 
-    Each event is tagged with its course in CATEGORIES, which is how the
-    student tells them apart once imported.
+    One VEVENT per topic event (not per action), tagged with its course in
+    CATEGORIES so the student can tell courses apart once imported.
     """
     lines = [
         "BEGIN:VCALENDAR",
@@ -44,19 +66,23 @@ def plan_to_ics(named_schedules: list[tuple[str, Schedule]], *, calendar_name: s
     ]
 
     events = sorted(
-        ((block, course_name) for course_name, schedule in named_schedules for block in schedule.blocks),
+        (
+            (event, course_name)
+            for course_name, schedule in named_schedules
+            for event in group_blocks_into_topic_events(schedule.blocks)
+        ),
         key=lambda item: item[0].start,
     )
-    for index, (block, course_name) in enumerate(events):
+    for index, (event, course_name) in enumerate(events):
         lines.extend(
             [
                 "BEGIN:VEVENT",
-                f"UID:learnsprint-{index}-{_stamp(block.start)}@learnsprint",
+                f"UID:learnsprint-{index}-{_stamp(event.start)}@learnsprint",
                 f"DTSTAMP:{_stamp(datetime.now())}",
-                f"DTSTART:{_stamp(block.start)}",
-                f"DTEND:{_stamp(block.end)}",
-                f"SUMMARY:{_escape(block.label)}",
-                f"DESCRIPTION:{_escape(BLOCK_DESCRIPTIONS[block.block_type])}",
+                f"DTSTART:{_stamp(event.start)}",
+                f"DTEND:{_stamp(event.end)}",
+                f"SUMMARY:{_escape(event_summary(event))}",
+                f"DESCRIPTION:{_escape(event_description(event, course_name))}",
                 f"CATEGORIES:{_escape(course_name)}",
                 "END:VEVENT",
             ]

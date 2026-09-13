@@ -12,11 +12,12 @@ from enum import Enum
 
 
 class ActionType(str, Enum):
-    """The three learning actions generated per topic (FR2.3)."""
+    """The three default learning actions per topic (FR2.3), plus the student's own subtasks."""
 
     READ = "read"
     SUMMARIZE = "summarize"
     QUIZ = "quiz"
+    CUSTOM = "custom"
 
 
 class TimePreference(str, Enum):
@@ -53,6 +54,12 @@ class PendingAction:
     topic_id: str
     action_type: ActionType
     duration_minutes: int
+    # What the subtask is called - "Read" for a default, whatever the student typed for a custom one.
+    title: str = ""
+
+    @property
+    def display_title(self) -> str:
+        return self.title or self.action_type.value.capitalize()
 
 
 @dataclass(frozen=True)
@@ -77,6 +84,7 @@ class ScheduledBlock:
     label: str
     # Set for ACTION blocks only, so the calendar can open the exact action (FR6.1).
     action_id: str | None = None
+    action_title: str | None = None
 
     @property
     def duration_minutes(self) -> int:

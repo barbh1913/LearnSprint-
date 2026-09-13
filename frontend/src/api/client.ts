@@ -10,6 +10,8 @@ import type {
   GoogleCalendarStatus,
   Grades,
   MasteryLevel,
+  Material,
+  Priority,
   Schedule,
   Sprint,
   StudentPlan,
@@ -28,6 +30,23 @@ export interface ExtractionResult {
   analysedBy: 'ai' | 'heuristic'
   totalEstimatedMinutes: number
   note: string | null
+}
+
+/** What a topic edit may change. `description: null` clears it; a topic-level estimate is re-split across the subtasks. */
+export interface TopicChanges {
+  name?: string
+  description?: string | null
+  priority?: Priority
+  estimatedMinutes?: number
+}
+
+export interface ActionResult {
+  id: string
+  topicId: string
+  type: string
+  title: string
+  order: number
+  durationMinutes: number
 }
 
 export interface GoogleSyncResult {
@@ -185,7 +204,7 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  updateTopic: (courseId: string, topicId: string, changes: Partial<Topic>) =>
+  updateTopic: (courseId: string, topicId: string, changes: TopicChanges) =>
     request<Topic>(`/courses/${courseId}/topics/${topicId}`, {
       method: 'PATCH',
       body: JSON.stringify(changes),
@@ -194,11 +213,53 @@ export const api = {
   deleteTopic: (courseId: string, topicId: string) =>
     request<void>(`/courses/${courseId}/topics/${topicId}`, { method: 'DELETE' }),
 
-  updateAction: (courseId: string, topicId: string, actionId: string, durationMinutes: number) =>
-    request<{ id: string; topicId: string; type: string; durationMinutes: number }>(
-      `/courses/${courseId}/topics/${topicId}/actions/${actionId}`,
-      { method: 'PATCH', body: JSON.stringify({ durationMinutes }) },
+  // Subtasks (FR2.3)
+  createAction: (courseId: string, topicId: string, title: string, durationMinutes: number) =>
+    request<ActionResult>(`/courses/${courseId}/topics/${topicId}/actions`, {
+      method: 'POST',
+      body: JSON.stringify({ title, durationMinutes }),
+    }),
+
+  updateAction: (
+    courseId: string,
+    topicId: string,
+    actionId: string,
+    changes: { title?: string; durationMinutes?: number },
+  ) =>
+    request<ActionResult>(`/courses/${courseId}/topics/${topicId}/actions/${actionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  deleteAction: (courseId: string, topicId: string, actionId: string) =>
+    request<void>(`/courses/${courseId}/topics/${topicId}/actions/${actionId}`, {
+      method: 'DELETE',
+    }),
+
+  // Materials attached to a topic (FR2.9) - the student's own only.
+  listMaterials: (courseId: string, topicId: string) =>
+    request<Material[]>(`/courses/${courseId}/topics/${topicId}/materials`),
+
+  uploadMaterials: (courseId: string, topicId: string, files: File[]) => {
+    const body = new FormData()
+    for (const file of files) {
+      body.append('files', file)
+    }
+    return request<Material[]>(`/courses/${courseId}/topics/${topicId}/materials`, {
+      method: 'POST',
+      body,
+    })
+  },
+
+  getMaterialDownloadLink: (courseId: string, topicId: string, materialId: string) =>
+    request<{ url: string; expiresInSeconds: number }>(
+      `/courses/${courseId}/topics/${topicId}/materials/${materialId}/download`,
     ),
+
+  deleteMaterial: (courseId: string, topicId: string, materialId: string) =>
+    request<void>(`/courses/${courseId}/topics/${topicId}/materials/${materialId}`, {
+      method: 'DELETE',
+    }),
 
   /** Upload up to 15 files at once; they're analysed together as one corpus. */
   extractTopics: (courseId: string, files: File[]) => {

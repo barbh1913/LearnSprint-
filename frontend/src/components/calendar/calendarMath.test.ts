@@ -1,31 +1,64 @@
 import { describe, expect, it } from 'vitest'
-import type { ScheduleBlock } from '../../types'
+import type { ScheduleEvent } from '../../types'
 import {
   addMonths,
-  blocksOnDay,
+  eventToItem,
   hourRange,
   initialCursorFor,
+  itemsOnDay,
   monthGrid,
   placement,
   startOfWeek,
   weekDays,
+  type CalendarItem,
 } from './calendarMath'
 
-function block(start: string, end: string, label = 'Read: Trees'): ScheduleBlock {
+function item(start: string, end: string, label = 'Trees'): CalendarItem {
   return {
+    id: `${label}-${start}`,
     start,
     end,
     durationMinutes: 60,
-    blockType: 'action',
+    kind: 'action',
     topicId: 't1',
-    topicName: 'Trees',
-    actionType: 'read',
-    actionId: 'a1',
     label,
-    courseId: 'c1',
     courseName: 'Data Structures',
+    actionIds: ['a1'],
+    actionTitles: ['Read'],
   }
 }
+
+describe('eventToItem', () => {
+  it('reduces a topic event to what the grid draws', () => {
+    const event: ScheduleEvent = {
+      topicId: 't1',
+      topicName: 'Trees',
+      kind: 'study',
+      start: '2026-09-14T18:00:00',
+      end: '2026-09-14T20:15:00',
+      durationMinutes: 135,
+      label: 'Trees',
+      actions: [
+        { actionId: 'a1', title: 'Read', minutes: 60 },
+        { actionId: 'a2', title: 'Summarize', minutes: 45 },
+      ],
+      courseId: 'c1',
+      courseName: 'Data Structures',
+    }
+
+    const result = eventToItem(event)
+
+    expect(result).toMatchObject({
+      kind: 'action',
+      label: 'Trees',
+      courseName: 'Data Structures',
+      actionIds: ['a1', 'a2'],
+      actionTitles: ['Read', 'Summarize'],
+    })
+    expect(eventToItem({ ...event, kind: 'review', actions: [] }).kind).toBe('review')
+    expect(eventToItem({ ...event, kind: 'study_aid', topicId: null }).kind).toBe('study_aid')
+  })
+})
 
 describe('startOfWeek', () => {
   it('goes back to Sunday at midnight', () => {
@@ -51,15 +84,15 @@ describe('weekDays', () => {
   })
 })
 
-describe('blocksOnDay', () => {
+describe('itemsOnDay', () => {
   it('keeps only that day, earliest first', () => {
-    const late = block('2026-09-14T20:00:00', '2026-09-14T21:00:00', 'late')
-    const early = block('2026-09-14T18:00:00', '2026-09-14T19:00:00', 'early')
-    const otherDay = block('2026-09-15T18:00:00', '2026-09-15T19:00:00', 'tomorrow')
+    const late = item('2026-09-14T20:00:00', '2026-09-14T21:00:00', 'late')
+    const early = item('2026-09-14T18:00:00', '2026-09-14T19:00:00', 'early')
+    const otherDay = item('2026-09-15T18:00:00', '2026-09-15T19:00:00', 'tomorrow')
 
-    const result = blocksOnDay([late, otherDay, early], new Date(2026, 8, 14))
+    const result = itemsOnDay([late, otherDay, early], new Date(2026, 8, 14))
 
-    expect(result.map((item) => item.label)).toEqual(['early', 'late'])
+    expect(result.map((entry) => entry.label)).toEqual(['early', 'late'])
   })
 })
 
@@ -70,21 +103,21 @@ describe('hourRange', () => {
 
   it('keeps the whole study day even when the sessions only use the evening', () => {
     const range = hourRange([
-      block('2026-09-14T15:30:00', '2026-09-14T16:15:00'),
-      block('2026-09-15T21:00:00', '2026-09-15T22:45:00'),
+      item('2026-09-14T15:30:00', '2026-09-14T16:15:00'),
+      item('2026-09-15T21:00:00', '2026-09-15T22:45:00'),
     ])
 
     expect(range).toEqual({ startHour: 8, endHour: 23 })
   })
 
   it('widens for an early-morning session rather than hiding it', () => {
-    const range = hourRange([block('2026-09-14T06:00:00', '2026-09-14T07:30:00')])
+    const range = hourRange([item('2026-09-14T06:00:00', '2026-09-14T07:30:00')])
 
     expect(range).toEqual({ startHour: 6, endHour: 23 })
   })
 
-  it('treats a block ending at midnight as ending at 24:00', () => {
-    const range = hourRange([block('2026-09-14T22:00:00', '2026-09-15T00:00:00')])
+  it('treats a session ending at midnight as ending at 24:00', () => {
+    const range = hourRange([item('2026-09-14T22:00:00', '2026-09-15T00:00:00')])
 
     expect(range.endHour).toBe(24)
   })
@@ -94,19 +127,19 @@ describe('placement', () => {
   const range = { startHour: 15, endHour: 23 }
 
   it('measures from the top of the visible range', () => {
-    const spot = placement(block('2026-09-14T16:30:00', '2026-09-14T17:15:00'), range)
+    const spot = placement(item('2026-09-14T16:30:00', '2026-09-14T17:15:00'), range)
 
     expect(spot).toEqual({ top: 90, height: 45 })
   })
 
-  it('clips a block that runs past the range', () => {
-    const spot = placement(block('2026-09-14T22:30:00', '2026-09-14T23:30:00'), range)
+  it('clips a session that runs past the range', () => {
+    const spot = placement(item('2026-09-14T22:30:00', '2026-09-14T23:30:00'), range)
 
     expect(spot).toEqual({ top: 450, height: 30 })
   })
 
-  it('drops a block entirely outside the range', () => {
-    expect(placement(block('2026-09-14T06:00:00', '2026-09-14T07:00:00'), range)).toBeNull()
+  it('drops a session entirely outside the range', () => {
+    expect(placement(item('2026-09-14T06:00:00', '2026-09-14T07:00:00'), range)).toBeNull()
   })
 })
 
@@ -142,18 +175,18 @@ describe('initialCursorFor', () => {
   })
 
   it('opens on today when the plan has already started', () => {
-    const blocks = [block('2026-09-10T18:00:00', '2026-09-10T19:00:00')]
+    const items = [item('2026-09-10T18:00:00', '2026-09-10T19:00:00')]
 
-    expect(initialCursorFor(blocks, today).getDate()).toBe(16)
+    expect(initialCursorFor(items, today).getDate()).toBe(16)
   })
 
   it('jumps to the first session when the whole plan is in a later week', () => {
-    const blocks = [
-      block('2026-09-28T18:00:00', '2026-09-28T19:00:00'),
-      block('2026-09-22T18:00:00', '2026-09-22T19:00:00'),
+    const items = [
+      item('2026-09-28T18:00:00', '2026-09-28T19:00:00'),
+      item('2026-09-22T18:00:00', '2026-09-22T19:00:00'),
     ]
 
-    const cursor = initialCursorFor(blocks, today)
+    const cursor = initialCursorFor(items, today)
 
     expect(cursor.getMonth()).toBe(8)
     expect(cursor.getDate()).toBe(22)

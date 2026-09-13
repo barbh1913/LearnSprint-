@@ -73,6 +73,9 @@ class FakeBucket:
     def delete(self, key: str) -> None:
         self.objects.pop(key, None)
 
+    def presigned_get_url(self, key: str, *, file_name: str, expires_in: int) -> str:
+        return f"https://fake-bucket.test/{key}?filename={file_name}&expires={expires_in}"
+
 
 @pytest.fixture(autouse=True)
 def fake_storage(monkeypatch: pytest.MonkeyPatch) -> FakeBucket:
@@ -82,5 +85,6 @@ def fake_storage(monkeypatch: pytest.MonkeyPatch) -> FakeBucket:
     monkeypatch.setattr(storage, "put_object", bucket.put)
     monkeypatch.setattr(storage, "get_object", bucket.get)
     monkeypatch.setattr(storage, "delete_object", bucket.delete)
+    monkeypatch.setattr(storage, "presigned_get_url", bucket.presigned_get_url)
 
     return bucket

@@ -1,29 +1,29 @@
 import { cn } from '../../lib/utils'
-import type { ScheduleBlock } from '../../types'
-import { DAY_LABELS, blocksOnDay, isSameDay, monthGrid } from './calendarMath'
+import type { BlockType } from '../../types'
+import { DAY_LABELS, isSameDay, itemsOnDay, monthGrid, type CalendarItem } from './calendarMath'
 
 const MAX_CHIPS_PER_DAY = 3
 
-const CHIP_STYLES: Record<ScheduleBlock['blockType'], string> = {
+const CHIP_STYLES: Record<BlockType, string> = {
   action: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
   review: 'bg-indigo-100 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200',
   study_aid: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
 }
 
 /**
- * The month overview (FR6.1): six weeks of day cells, each listing its sessions
- * as compact chips. It is a map, not a workspace - clicking a day hands off to
- * the week view, where events have real height and can be opened.
+ * The month overview (FR6.1): six weeks of day cells, each listing its topic
+ * events as compact chips. It is a map, not a workspace - clicking a day hands
+ * off to the week view, where events have real height and can be opened.
  */
 export function MonthGrid({
   month,
-  blocks,
+  items,
   today,
   showCourse = false,
   onSelectDay,
 }: {
   month: Date
-  blocks: ScheduleBlock[]
+  items: CalendarItem[]
   today: Date
   /** Prefix each chip with its course - on when several courses share the grid. */
   showCourse?: boolean
@@ -46,8 +46,8 @@ export function MonthGrid({
           {days.map((day, index) => {
             const inMonth = day.getMonth() === month.getMonth()
             const isToday = isSameDay(day, today)
-            const dayBlocks = blocksOnDay(blocks, day)
-            const overflow = dayBlocks.length - MAX_CHIPS_PER_DAY
+            const dayItems = itemsOnDay(items, day)
+            const overflow = dayItems.length - MAX_CHIPS_PER_DAY
 
             return (
               <button
@@ -75,19 +75,19 @@ export function MonthGrid({
                   {day.getDate()}
                 </span>
 
-                {dayBlocks.slice(0, MAX_CHIPS_PER_DAY).map((block, blockIndex) => (
+                {dayItems.slice(0, MAX_CHIPS_PER_DAY).map((item) => (
                   <span
-                    key={`${block.start}-${blockIndex}`}
+                    key={item.id}
                     className={cn(
                       'block truncate rounded px-1.5 py-0.5 text-[11px] leading-tight',
-                      CHIP_STYLES[block.blockType],
+                      CHIP_STYLES[item.kind],
                     )}
-                    title={showCourse && block.courseName ? `${block.courseName} · ${block.label}` : block.label}
+                    title={showCourse && item.courseName ? `${item.courseName} · ${item.label}` : item.label}
                   >
-                    {showCourse && block.courseName && (
-                      <span className="font-medium">{block.courseName} · </span>
+                    {showCourse && item.courseName && (
+                      <span className="font-medium">{item.courseName} · </span>
                     )}
-                    {block.label}
+                    {item.label}
                   </span>
                 ))}
                 {overflow > 0 && (

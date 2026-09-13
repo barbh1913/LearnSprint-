@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Plus, Star, Trash2, Upload } from 'lucide-react'
 import { api } from '../api/client'
 import type { BoardCard, Course, MasteryLevel } from '../types'
-import { ACTION_LABELS, STATUS_LABELS } from '../types'
+import { STATUS_LABELS } from '../types'
 import {
   Badge,
   Button,
@@ -113,7 +113,9 @@ export function CourseDetailPage() {
   }
 
   function handleTogglePriority(card: BoardCard) {
-    runMutation(() => api.updateTopic(courseId, card.topicId, { isPriority: !card.isPriority }))
+    // The star is the quick way to flag a core topic; the detail dialog offers all three levels.
+    const priority = card.priority === 'high' ? 'medium' : 'high'
+    runMutation(() => api.updateTopic(courseId, card.topicId, { priority }))
   }
 
   function handleDeleteTopic(card: BoardCard) {
@@ -309,7 +311,7 @@ function TopicRow({
               className="size-4 rounded border-border accent-indigo-600"
             />
             <span className={action.isDone ? 'text-muted-foreground line-through' : ''}>
-              {ACTION_LABELS[action.type]}
+              {action.title}
             </span>
             <span className="text-xs text-muted-foreground">{action.durationMinutes}m</span>
           </label>
