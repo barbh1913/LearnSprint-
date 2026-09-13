@@ -191,6 +191,21 @@ class TestMaterialAnalysis:
         graphs_id = topics_of(headers, course["id"])["Graph Algorithms"]["id"]
         assert client.get(f"/courses/{course['id']}/topics/{graphs_id}/materials", headers=headers).json() == []
 
+    def test_one_file_is_one_topic_with_at_most_five_key_points(self) -> None:
+        # A deck with many headings must not become many topics: the first
+        # heading names the unit, the rest are its key points, capped at five.
+        headers = auth_headers()
+        course = create_course(headers)
+        headings = ["Graph Algorithms"] + [f"{i}. Section {i}" for i in range(1, 10)]
+
+        body = analyze(headers, course["id"], "lecture5.pptx", *headings).json()
+
+        assert body["content"]["title"] == "Graph Algorithms"
+        assert body["content"]["keyPoints"] == [f"Section {i}" for i in range(1, 6)]
+        assert body["recommendation"]["decision"] == "create_new"
+        assert body["recommendation"]["suggestedTitle"] == "Graph Algorithms"
+        assert len(topics_of(headers, course["id"])) == 0
+
     def test_attaching_to_the_recommended_topic_files_the_material_and_refreshes_the_description(self) -> None:
         headers = auth_headers()
         course = create_course(headers)

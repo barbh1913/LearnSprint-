@@ -62,11 +62,16 @@ export function MaterialDecisionDialog({
         <div className="space-y-4">
           {analysis.note && <p className="text-xs text-muted-foreground">{analysis.note}</p>}
 
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Proposed topic</p>
+            <p className="text-sm font-medium">{content.title}</p>
+          </div>
+
           {content.summary && <p className="text-sm">{content.summary}</p>}
 
           {content.keyPoints.length > 0 && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">Detected topics</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Key points</p>
               <div className="flex flex-wrap gap-1.5">
                 {content.keyPoints.map((point) => (
                   <Badge key={point}>{point}</Badge>
