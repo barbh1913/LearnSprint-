@@ -253,6 +253,14 @@ def update_action(
 def delete_topic(
     course_id: str, topic_id: str, user_id: str = Depends(get_current_user_id)
 ) -> None:
+    """Delete a shared topic and every group member's private progress on it.
+
+    A topic can be shared by a whole study group (FR5.2), so deleting it for
+    everyone but leaving the other members' UserTopicProgress/UserActionProgress
+    rows pointing at now-nonexistent actions would strand orphaned data under
+    their partitions forever - the same class of bug already fixed for course
+    deletion in academic_profile.
+    """
     _require_membership(user_id, course_id)
 
     action_ids = [
@@ -261,7 +269,9 @@ def delete_topic(
         if action["topicId"] == topic_id
     ]
     repository.delete_topic(course_id, topic_id)
-    progress_repo.delete_topic_progress(user_id, topic_id, action_ids)
+
+    for member in course_repo.list_course_members(course_id):
+        progress_repo.delete_topic_progress(member["userId"], topic_id, action_ids)
 
 
 def _require_membership(user_id: str, course_id: str) -> dict[str, Any]:

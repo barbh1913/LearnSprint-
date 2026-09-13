@@ -465,6 +465,93 @@ class TestTopicsAndBoard:
 
         assert response.status_code == 422
 
+    def test_deleting_a_topic_removes_it_from_the_board(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=headers
+        ).json()
+
+        response = client.delete(
+            f"/courses/{course['id']}/topics/{topic['id']}", headers=headers
+        )
+        board = client.get(f"/board?courseId={course['id']}", headers=headers).json()
+
+        assert response.status_code == 204
+        assert board["cards"] == []
+
+    def test_deleting_a_topic_cleans_up_every_members_progress(self, fake_dynamo) -> None:
+        # Same class of bug as the course-level cascade delete: a topic can be
+        # shared by a whole study group, so removing it must not strand the
+        # other members' private progress rows under their own USER# partition.
+        owner = auth_headers("owner@example.com")
+        peer = auth_headers("peer@example.com")
+        course = create_course(owner)
+        client.post(
+            f"/courses/{course['id']}/members", json={"email": "peer@example.com"}, headers=owner
+        )
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Shared topic"}, headers=owner
+        ).json()
+        peer_id = client.get("/auth/me", headers=peer).json()["id"]
+
+        board = client.get(f"/board?courseId={course['id']}", headers=peer).json()
+        action_id = board["cards"][0]["actions"][0]["id"]
+        client.patch(
+            f"/actions/{action_id}/progress?courseId={course['id']}",
+            json={"isDone": True},
+            headers=peer,
+        )
+
+        client.delete(f"/courses/{course['id']}/topics/{topic['id']}", headers=owner)
+
+        remaining = fake_dynamo.query(f"USER#{peer_id}")
+        assert not any(topic["id"] in item["SK"] for item in remaining)
+        assert not any(action_id in item["SK"] for item in remaining)
+
+    def test_a_non_member_cannot_touch_another_courses_topics(self) -> None:
+        owner = auth_headers("owner2@example.com")
+        stranger = auth_headers("stranger@example.com")
+        course = create_course(owner)
+        topic = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Heaps"}, headers=owner
+        ).json()
+        action_id = client.get(f"/board?courseId={course['id']}", headers=owner).json()[
+            "cards"
+        ][0]["actions"][0]["id"]
+
+        assert (
+            client.get(f"/courses/{course['id']}/topics", headers=stranger).status_code == 403
+        )
+        assert (
+            client.post(
+                f"/courses/{course['id']}/topics", json={"name": "Intruder"}, headers=stranger
+            ).status_code
+            == 403
+        )
+        assert (
+            client.patch(
+                f"/courses/{course['id']}/topics/{topic['id']}",
+                json={"name": "Hijacked"},
+                headers=stranger,
+            ).status_code
+            == 403
+        )
+        assert (
+            client.patch(
+                f"/courses/{course['id']}/topics/{topic['id']}/actions/{action_id}",
+                json={"durationMinutes": 90},
+                headers=stranger,
+            ).status_code
+            == 403
+        )
+        assert (
+            client.delete(
+                f"/courses/{course['id']}/topics/{topic['id']}", headers=stranger
+            ).status_code
+            == 403
+        )
+
 
 class TestSchedule:
     def test_schedule_covers_the_topics(self) -> None:
@@ -669,6 +756,94 @@ class TestUpload:
         )
 
         assert response.status_code == 413
+
+    def test_a_deck_with_no_text_is_rejected(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("empty.pptx", _make_pptx(), "application/x"))],
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert "no readable text" in response.json()["detail"].lower()
+
+    def test_a_deck_with_only_noise_finds_no_topics(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("noise.pptx", _make_pptx("1", "2", "3"), "application/x"))],
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert "no topics could be found" in response.json()["detail"].lower()
+
+    def test_ai_analysis_estimates_topic_minutes_when_enabled(self, monkeypatch) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        monkeypatch.setattr(
+            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
+        )
+        client.put(
+            "/ai-settings", json={"aiEnabled": True, "apiKey": "sk-test-1234567890"}, headers=headers
+        )
+
+        from features.content_topics.infrastructure.ai_extractor import AnalysedTopic
+
+        monkeypatch.setattr(
+            "features.content_topics.infrastructure.ai_extractor.analyse_syllabus",
+            lambda lines, api_key: [
+                AnalysedTopic(name="Dynamic Programming", estimated_minutes=90, language="en")
+            ],
+        )
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("lecture1.pptx", _make_pptx("whatever"), "application/x"))],
+            headers=headers,
+        )
+
+        body = response.json()
+        assert body["analysedBy"] == "ai"
+        assert body["created"][0]["name"] == "Dynamic Programming"
+        assert body["totalEstimatedMinutes"] == 90
+
+    def test_falls_back_to_the_heuristic_when_ai_analysis_fails(self, monkeypatch) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        monkeypatch.setattr(
+            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
+        )
+        client.put(
+            "/ai-settings", json={"aiEnabled": True, "apiKey": "sk-test-1234567890"}, headers=headers
+        )
+
+        from features.content_topics.infrastructure.ai_extractor import AiAnalysisUnavailable
+
+        def boom(lines, api_key):
+            raise AiAnalysisUnavailable("rate limited")
+
+        monkeypatch.setattr(
+            "features.content_topics.infrastructure.ai_extractor.analyse_syllabus", boom
+        )
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[
+                ("files", ("lecture1.pptx", _make_pptx("Binary Search Trees"), "application/x"))
+            ],
+            headers=headers,
+        )
+
+        body = response.json()
+        assert body["analysedBy"] == "heuristic"
+        assert "rate limited" in body["note"]
+        assert {topic["name"] for topic in body["created"]} == {"Binary Search Trees"}
 
 
 class TestSprintEndpoint:
