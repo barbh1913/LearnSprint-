@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CourseMembers } from './CourseMembers'
 
@@ -21,10 +21,9 @@ const peer = {
 }
 
 function mockMembers(members: object[]) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => members }),
-  )
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => members })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 beforeEach(() => {
@@ -74,5 +73,47 @@ describe('CourseMembers', () => {
     await screen.findByRole('heading', { name: 'Study group' })
     expect(container.textContent).not.toContain('95')
     expect(container.textContent).not.toContain('finalGrade')
+  })
+
+  it('only lets a member leave, never remove someone else', async () => {
+    mockMembers([{ ...owner, isMe: false }, { ...peer, isMe: true }])
+
+    render(<CourseMembers courseId="c1" />)
+
+    expect(await screen.findByLabelText('Leave this course')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Remove owner@example.com')).not.toBeInTheDocument()
+  })
+
+  it('skips the removal when the confirmation is declined', async () => {
+    const fetchMock = mockMembers([{ ...owner, isMe: true }, { ...peer, isMe: false }])
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    render(<CourseMembers courseId="c1" />)
+    fireEvent.click(await screen.findByLabelText('Remove peer@example.com'))
+
+    expect(window.confirm).toHaveBeenCalledWith('Remove peer@example.com from this course?')
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false)
+  })
+
+  it('removes the member once the owner confirms', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let removed = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options: RequestInit = {}) => {
+        if (options.method === 'DELETE') {
+          removed = true
+          return { ok: true, status: 204, json: async () => undefined }
+        }
+        const members = removed ? [{ ...owner, isMe: true }] : [{ ...owner, isMe: true }, { ...peer, isMe: false }]
+        return { ok: true, status: 200, json: async () => members }
+      }),
+    )
+
+    render(<CourseMembers courseId="c1" />)
+    fireEvent.click(await screen.findByLabelText('Remove peer@example.com'))
+
+    await waitFor(() => expect(removed).toBe(true))
+    await waitFor(() => expect(screen.queryByText('peer@example.com')).not.toBeInTheDocument())
   })
 })

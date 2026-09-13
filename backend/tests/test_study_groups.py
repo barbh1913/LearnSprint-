@@ -205,6 +205,35 @@ class TestPeerProgress:
         members = client.get(f"/courses/{course['id']}/members", headers=owner).json()
         assert members[0]["percentComplete"] == 0
 
+    def test_a_manual_status_override_counts_the_same_for_peers_as_on_the_students_own_board(
+        self,
+    ) -> None:
+        # Regression: peer_view has its own call into derive_status (separate
+        # from the board's), and it was missing the manual_override flag - a
+        # topic dragged straight to Done (FR4.3) showed as done on the
+        # student's own board but as 0% to everyone else in the group.
+        owner = register("owner@example.com")
+        peer = register("peer@example.com")
+        course = create_course(owner)
+        topic = add_topic(owner, course["id"], "Deadlock")
+        client.post(
+            f"/courses/{course['id']}/members",
+            json={"email": "peer@example.com"},
+            headers=owner,
+        )
+
+        client.patch(
+            f"/topics/{topic['id']}/progress?courseId={course['id']}",
+            json={"status": "done"},
+            headers=owner,
+        )
+        own_board = client.get(f"/board?courseId={course['id']}", headers=owner).json()
+        assert own_board["cards"][0]["status"] == "done"
+
+        members = client.get(f"/courses/{course['id']}/members", headers=peer).json()
+        by_email = {member["email"]: member for member in members}
+        assert by_email["owner@example.com"]["percentComplete"] == 100
+
 
 class TestPrivacy:
     """FR5.4 / NFR3 - enforced at the API, not by hoping the UI hides it."""
