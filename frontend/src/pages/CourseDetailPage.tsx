@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Star, Trash2, Upload } from 'lucide-react'
+import { ArrowLeft, FileSearch, ListTree, Plus, Star, Trash2, Upload } from 'lucide-react'
 import { api } from '../api/client'
-import type { BoardCard, Course, MasteryLevel } from '../types'
+import type {
+  BoardCard,
+  Course,
+  MasteryLevel,
+  MaterialAnalysis,
+  SyllabusAnalysis,
+  SyllabusItemDecision,
+} from '../types'
 import { STATUS_LABELS } from '../types'
+import { MaterialDecisionDialog } from '../components/MaterialDecisionDialog'
+import { SyllabusReviewDialog } from '../components/SyllabusReviewDialog'
 import {
   Badge,
   Button,
@@ -28,7 +37,11 @@ export function CourseDetailPage() {
   const [newTopic, setNewTopic] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const [uploadNote, setUploadNote] = useState('')
+  const [analysis, setAnalysis] = useState<MaterialAnalysis | null>(null)
+  const [syllabus, setSyllabus] = useState<SyllabusAnalysis | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const singleFileInput = useRef<HTMLInputElement>(null)
+  const syllabusInput = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     try {
@@ -68,7 +81,7 @@ export function CourseDetailPage() {
           `Found ${result.created.length} topics across ${source}`,
           result.analysedBy === 'ai'
             ? `AI estimated about ${hours}h of study time in total.`
-            : 'Using default time estimates — turn on AI analysis in your profile for real estimates.',
+            : 'Using default time estimates (AI analysis is not available on this server).',
           result.note,
         ]
           .filter(Boolean)
@@ -81,6 +94,60 @@ export function CourseDetailPage() {
       setIsUploading(false)
       if (fileInput.current) fileInput.current.value = ''
     }
+  }
+
+  /** One file: understand it, then let the student decide where it belongs (FR2.8). */
+  async function handleAnalyzeFile(file: File) {
+    setIsUploading(true)
+    setUploadNote('')
+    setError('')
+    try {
+      setAnalysis(await api.analyzeMaterial(courseId, file))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not analyse that file')
+    } finally {
+      setIsUploading(false)
+      if (singleFileInput.current) singleFileInput.current.value = ''
+    }
+  }
+
+  async function handleConfirmMaterial(
+    decision: { decision: 'attach'; topicId: string } | { decision: 'create'; title: string },
+  ) {
+    if (!analysis) return
+    const result = await api.confirmMaterial(courseId, analysis.materialId, decision)
+    setAnalysis(null)
+    setUploadNote(
+      result.created
+        ? `Created "${result.topicName}" from ${analysis.fileName}.`
+        : `Filed ${analysis.fileName} under "${result.topicName}".`,
+    )
+    await load()
+  }
+
+  /** A syllabus: propose lecture-level topics for review before anything is created (FR2.10). */
+  async function handleAnalyzeSyllabus(file: File) {
+    setIsUploading(true)
+    setUploadNote('')
+    setError('')
+    try {
+      setSyllabus(await api.analyzeSyllabus(courseId, file))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not analyse that syllabus')
+    } finally {
+      setIsUploading(false)
+      if (syllabusInput.current) syllabusInput.current.value = ''
+    }
+  }
+
+  async function handleConfirmSyllabus(items: SyllabusItemDecision[]) {
+    if (!syllabus) return
+    const result = await api.confirmSyllabus(courseId, syllabus.materialId, items)
+    setSyllabus(null)
+    setUploadNote(
+      `${result.created.length} topics created and ${result.attached.length} matched from ${syllabus.fileName}.`,
+    )
+    await load()
   }
 
   /** Runs a topic/action mutation, surfacing a failure instead of it silently
@@ -167,8 +234,8 @@ export function CourseDetailPage() {
       <Card className="mb-6">
         <h2 className="mb-1 font-medium">Add topics</h2>
         <p className="mb-3 text-sm text-muted-foreground">
-          Upload up to 15 PDF or PPTX files at once — they're analysed together to work out
-          the topics and how long each takes to learn.
+          Upload a batch of decks to extract topics at once, analyse one file to file it under
+          the right topic, or analyse the syllabus to propose one topic per lecture.
         </p>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -178,6 +245,7 @@ export function CourseDetailPage() {
             accept=".pdf,.pptx"
             multiple
             className="hidden"
+            aria-label="Upload course material"
             onChange={(event) => {
               const files = Array.from(event.target.files ?? [])
               if (files.length > 0) handleUpload(files)
@@ -186,6 +254,38 @@ export function CourseDetailPage() {
           <Button onClick={() => fileInput.current?.click()} disabled={isUploading}>
             <Upload className="size-4" aria-hidden />
             {isUploading ? 'Analysing material' : 'Upload course material'}
+          </Button>
+
+          <input
+            ref={singleFileInput}
+            type="file"
+            accept=".pdf,.pptx"
+            className="hidden"
+            aria-label="Analyse one file"
+            onChange={(event) => {
+              const [file] = Array.from(event.target.files ?? [])
+              if (file) handleAnalyzeFile(file)
+            }}
+          />
+          <Button onClick={() => singleFileInput.current?.click()} disabled={isUploading}>
+            <FileSearch className="size-4" aria-hidden />
+            Analyse one file
+          </Button>
+
+          <input
+            ref={syllabusInput}
+            type="file"
+            accept=".pdf,.pptx"
+            className="hidden"
+            aria-label="Analyse a syllabus"
+            onChange={(event) => {
+              const [file] = Array.from(event.target.files ?? [])
+              if (file) handleAnalyzeSyllabus(file)
+            }}
+          />
+          <Button onClick={() => syllabusInput.current?.click()} disabled={isUploading}>
+            <ListTree className="size-4" aria-hidden />
+            Analyse a syllabus
           </Button>
 
           <span className="text-sm text-muted-foreground">or</span>
@@ -242,6 +342,21 @@ export function CourseDetailPage() {
       <div className="mt-6">
         <CourseMembers courseId={courseId} />
       </div>
+
+      <MaterialDecisionDialog
+        key={analysis?.materialId ?? 'none'}
+        analysis={analysis}
+        topics={cards}
+        onConfirm={handleConfirmMaterial}
+        onClose={() => setAnalysis(null)}
+      />
+      <SyllabusReviewDialog
+        key={syllabus?.materialId ?? 'none'}
+        analysis={syllabus}
+        topics={cards}
+        onConfirm={handleConfirmSyllabus}
+        onClose={() => setSyllabus(null)}
+      />
     </>
   )
 }
