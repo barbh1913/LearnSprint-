@@ -16,6 +16,7 @@ from features.content_topics.infrastructure import repository
 from features.progress.infrastructure import repository as progress_repo
 from shared import storage
 from shared.auth.dependencies import get_current_user_id
+from shared.config import settings
 
 router = APIRouter(tags=["content-topics"])
 
@@ -120,7 +121,7 @@ async def extract_from_files(
     whole semester of lecture decks produces a single de-duplicated topic list
     rather than one per file.
 
-    If the student enabled AI analysis and stored their API key, Claude reads the
+    When the backend has an Anthropic key configured (FR2.7), Claude reads the
     material and estimates how long each topic takes to learn. Otherwise - or if
     the AI call fails for any reason - the keyword heuristic runs instead and the
     default per-action durations apply. Either way the upload succeeds.
@@ -137,8 +138,7 @@ async def extract_from_files(
     if not lines:
         raise HTTPException(status_code=422, detail="Those files had no readable text")
 
-    ai_settings = course_repo.get_ai_settings(user_id)
-    topics, analysed_by, note = _analyse(lines, ai_settings)
+    topics, analysed_by, note = _analyse(lines)
 
     if not topics:
         raise HTTPException(
@@ -203,17 +203,15 @@ async def _read_all(
     return lines, filenames
 
 
-def _analyse(
-    lines: list[str], ai_settings: dict[str, Any]
-) -> tuple[list[tuple[str, int | None, str]], str, str | None]:
-    """Run AI analysis when it's enabled, otherwise the heuristic.
+def _analyse(lines: list[str]) -> tuple[list[tuple[str, int | None, str]], str, str | None]:
+    """Run AI analysis when the backend has a key, otherwise the heuristic.
 
     Returns (topics, which analyser ran, an optional note for the student).
     The AI path is never allowed to fail the upload.
     """
-    if ai_settings.get("aiEnabled") and ai_settings.get("apiKey"):
+    if settings.system_anthropic_api_key:
         try:
-            analysed = ai_extractor.analyse_syllabus(lines, api_key=ai_settings["apiKey"])
+            analysed = ai_extractor.analyse_syllabus(lines, api_key=settings.system_anthropic_api_key)
             return (
                 [(topic.name, topic.estimated_minutes, topic.language) for topic in analysed],
                 "ai",

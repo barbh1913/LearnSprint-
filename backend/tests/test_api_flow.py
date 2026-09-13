@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app
+from shared.config import settings
 
 client = TestClient(app)
 
@@ -149,69 +150,13 @@ class TestGrades:
         assert grades["overall"]["average"] is None
 
 
-class TestAiSettings:
-    def test_defaults_before_anything_is_saved(self) -> None:
-        settings = client.get("/ai-settings", headers=auth_headers()).json()
-
-        assert settings == {"aiEnabled": False, "hasApiKey": False, "keyHint": None}
-
-    def test_enabling_without_a_key_is_rejected(self) -> None:
-        response = client.put(
-            "/ai-settings", json={"aiEnabled": True}, headers=auth_headers()
-        )
-
-        assert response.status_code == 422
-
-    def test_enabling_with_a_key_the_provider_rejects_fails(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "features.academic_profile.presentation.router.verify_api_key", lambda key: False
-        )
-
-        response = client.put(
-            "/ai-settings",
-            json={"aiEnabled": True, "apiKey": "sk-ant-not-actually-valid"},
-            headers=auth_headers(),
-        )
-
-        assert response.status_code == 422
-
-    def test_enabling_with_a_valid_key_succeeds_and_never_echoes_it(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
-        )
+class TestAiSettingsAreGone:
+    def test_the_per_user_key_endpoints_no_longer_exist(self) -> None:
+        # AI is a backend capability now (FR2.7, ADR 0013): nothing per student to configure.
         headers = auth_headers()
 
-        response = client.put(
-            "/ai-settings",
-            json={"aiEnabled": True, "apiKey": "sk-ant-abcdef1234"},
-            headers=headers,
-        )
-
-        body = response.json()
-        assert response.status_code == 200
-        assert body["aiEnabled"] is True
-        assert body["hasApiKey"] is True
-        assert body["keyHint"] == "...1234"
-        assert "apiKey" not in body
-
-    def test_toggling_off_keeps_the_saved_key(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
-        )
-        headers = auth_headers()
-        client.put(
-            "/ai-settings",
-            json={"aiEnabled": True, "apiKey": "sk-ant-abcdef1234"},
-            headers=headers,
-        )
-
-        # No apiKey in this request - the frontend never holds the real key.
-        response = client.put("/ai-settings", json={"aiEnabled": False}, headers=headers)
-
-        body = response.json()
-        assert body["aiEnabled"] is False
-        assert body["hasApiKey"] is True
-        assert body["keyHint"] == "...1234"
+        assert client.get("/ai-settings", headers=headers).status_code == 404
+        assert client.put("/ai-settings", json={"aiEnabled": True}, headers=headers).status_code == 404
 
 
 class TestTopicsAndBoard:
@@ -857,23 +802,21 @@ class TestUpload:
         assert response.status_code == 422
         assert "no topics could be found" in response.json()["detail"].lower()
 
-    def test_ai_analysis_estimates_topic_minutes_when_enabled(self, monkeypatch) -> None:
+    def test_ai_analysis_estimates_topic_minutes_when_the_system_key_is_set(self, monkeypatch) -> None:
         headers = auth_headers()
         course = create_course(headers)
-        monkeypatch.setattr(
-            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
-        )
-        client.put(
-            "/ai-settings", json={"aiEnabled": True, "apiKey": "sk-test-1234567890"}, headers=headers
-        )
+        monkeypatch.setattr(settings, "system_anthropic_api_key", "sk-test-1234567890")
 
         from features.content_topics.infrastructure.ai_extractor import AnalysedTopic
 
+        seen_keys: list[str] = []
+
+        def fake_analyse(lines, api_key):
+            seen_keys.append(api_key)
+            return [AnalysedTopic(name="Dynamic Programming", estimated_minutes=90, language="en")]
+
         monkeypatch.setattr(
-            "features.content_topics.infrastructure.ai_extractor.analyse_syllabus",
-            lambda lines, api_key: [
-                AnalysedTopic(name="Dynamic Programming", estimated_minutes=90, language="en")
-            ],
+            "features.content_topics.infrastructure.ai_extractor.analyse_syllabus", fake_analyse
         )
 
         response = client.post(
@@ -886,16 +829,35 @@ class TestUpload:
         assert body["analysedBy"] == "ai"
         assert body["created"][0]["name"] == "Dynamic Programming"
         assert body["totalEstimatedMinutes"] == 90
+        # The backend's own key, never anything from the student.
+        assert seen_keys == ["sk-test-1234567890"]
+        assert "sk-test" not in response.text
+
+    def test_the_heuristic_runs_when_no_system_key_is_configured(self, monkeypatch) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        monkeypatch.setattr(settings, "system_anthropic_api_key", "")
+
+        def must_not_run(lines, api_key):
+            raise AssertionError("AI must not be called without a system key")
+
+        monkeypatch.setattr(
+            "features.content_topics.infrastructure.ai_extractor.analyse_syllabus", must_not_run
+        )
+
+        response = client.post(
+            f"/courses/{course['id']}/topics/extract",
+            files=[("files", ("lecture1.pptx", _make_pptx("Binary Search Trees"), "application/x"))],
+            headers=headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["analysedBy"] == "heuristic"
 
     def test_falls_back_to_the_heuristic_when_ai_analysis_fails(self, monkeypatch) -> None:
         headers = auth_headers()
         course = create_course(headers)
-        monkeypatch.setattr(
-            "features.academic_profile.presentation.router.verify_api_key", lambda key: True
-        )
-        client.put(
-            "/ai-settings", json={"aiEnabled": True, "apiKey": "sk-test-1234567890"}, headers=headers
-        )
+        monkeypatch.setattr(settings, "system_anthropic_api_key", "sk-test-1234567890")
 
         from features.content_topics.infrastructure.ai_extractor import AiAnalysisUnavailable
 

@@ -4,8 +4,8 @@ import {
   AlertTriangle,
   BookOpen,
   CalendarClock,
+  Kanban,
   Minus,
-  Sparkles,
   TrendingDown,
   TrendingUp,
   Upload,
@@ -264,10 +264,10 @@ export function DashboardPage() {
                     detail="Your sessions on a weekly calendar"
                   />
                   <QuickAction
-                    to="/profile"
-                    icon={Sparkles}
-                    label="Enable AI analysis"
-                    detail="Real study-time estimates from your material"
+                    to="/board"
+                    icon={Kanban}
+                    label="Plan this week's sprint"
+                    detail="Pull topics from Backlog into To do and see if they fit"
                   />
                 </div>
               </Card>

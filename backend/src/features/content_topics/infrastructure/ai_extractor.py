@@ -1,12 +1,11 @@
-"""AI-powered syllabus analysis (optional, opt-in per user).
+"""AI-powered analysis of course material (FR2.7, ADR 0013).
 
-When the student supplies their own Anthropic API key in their profile, this
-runs instead of the keyword heuristic in domain/extraction.py: Claude reads the
-raw slide/syllabus text and returns topics with an estimated study duration for
-each, which is a much better starting estimate than the fixed per-action
-defaults.
+When the backend has an Anthropic key configured, this runs instead of the
+keyword heuristic in domain/extraction.py: Claude reads the raw slide/syllabus
+text and returns topics with an estimated study duration for each, which is a
+much better starting estimate than the fixed per-action defaults.
 
-The key belongs to the student, is never logged, and is never returned to the
+The key is the backend's own, is never logged, and is never returned to the
 frontend. If anything here fails - no key, bad key, rate limit, malformed
 response - the caller falls back to the heuristic, so an AI outage can never
 block an upload.

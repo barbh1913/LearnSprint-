@@ -2,7 +2,6 @@
 // the auth header and error handling live in exactly one place.
 
 import type {
-  AiSettings,
   Board,
   Course,
   CourseMember,
@@ -274,14 +273,6 @@ export const api = {
   },
 
   getSprint: () => request<Sprint>('/sprint'),
-
-  getAiSettings: () => request<AiSettings>('/ai-settings'),
-
-  saveAiSettings: (settings: { aiEnabled: boolean; apiKey?: string }) =>
-    request<AiSettings>('/ai-settings', {
-      method: 'PUT',
-      body: JSON.stringify(settings),
-    }),
 
   getBoard: (courseId?: string) =>
     request<Board>(courseId ? `/board?courseId=${courseId}` : '/board'),

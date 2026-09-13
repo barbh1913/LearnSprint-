@@ -199,12 +199,6 @@ export interface Sprint {
   status: 'empty' | 'healthy' | 'tight' | 'over_committed' | 'no_capacity'
 }
 
-export interface AiSettings {
-  aiEnabled: boolean
-  hasApiKey: boolean
-  keyHint: string | null
-}
-
 export interface WeeklyCount {
   weekStart: string
   completed: number
