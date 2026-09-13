@@ -15,6 +15,7 @@ import {
 import { TopicDetailDialog } from '../components/TopicDetailDialog'
 import { WeekGrid } from '../components/calendar/WeekGrid'
 import { MonthGrid } from '../components/calendar/MonthGrid'
+import { GoogleCalendarControls } from '../components/calendar/GoogleCalendarControls'
 import {
   addDays,
   addMonths,
@@ -214,6 +215,8 @@ export function CalendarPage() {
           <Stat label="Sessions" value={String(schedule.blocks.length)} />
         </div>
       )}
+
+      <GoogleCalendarControls />
 
       {!courseId ? (
         <EmptyState

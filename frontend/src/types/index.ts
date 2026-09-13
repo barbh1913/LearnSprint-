@@ -87,6 +87,15 @@ export interface Schedule {
   shortfallMinutes?: number | null
 }
 
+/** Whether this student's Google account is linked for calendar sync (FR6.2). Never carries the credential. */
+export interface GoogleCalendarStatus {
+  /** False when the server has no Google client set up - the Calendar page then hides the controls. */
+  configured: boolean
+  connected: boolean
+  connectedAt: string | null
+  lastSyncedAt: string | null
+}
+
 export interface BlockedSlot {
   day: number
   startTime: string

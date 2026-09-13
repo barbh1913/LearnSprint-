@@ -59,17 +59,20 @@ const board = {
   doneTopics: 0,
 }
 
+const googleOff = { configured: false, connected: false, connectedAt: null, lastSyncedAt: null }
+
 function mockApi(responses: Record<string, unknown>) {
+  const all: Record<string, unknown> = { '/integrations/google-calendar/status': googleOff, ...responses }
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       const path = url.replace(/^.*\/api/, '')
       // Longest prefix wins, so "/courses/c1/schedule" isn't swallowed by "/courses".
-      const match = Object.keys(responses)
+      const match = Object.keys(all)
         .sort((a, b) => b.length - a.length)
         .find((key) => path.startsWith(key))
       if (!match) throw new Error(`Unexpected request: ${url}`)
-      return { ok: true, status: 200, json: async () => responses[match] }
+      return { ok: true, status: 200, json: async () => all[match] }
     }),
   )
 }

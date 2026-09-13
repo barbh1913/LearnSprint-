@@ -10,6 +10,7 @@ import { CoursesPage } from './pages/CoursesPage'
 import { CourseDetailPage } from './pages/CourseDetailPage'
 import { BoardPage } from './pages/BoardPage'
 import { CalendarPage } from './pages/CalendarPage'
+import { GoogleCalendarCallbackPage } from './pages/GoogleCalendarCallbackPage'
 import { GradesPage } from './pages/GradesPage'
 import { ProfilePage } from './pages/ProfilePage'
 
@@ -42,6 +43,7 @@ function App() {
             <Route path="/courses/:courseId" element={<CourseDetailPage />} />
             <Route path="/board" element={<BoardPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
+            <Route path="/calendar/google/callback" element={<GoogleCalendarCallbackPage />} />
             {/* The Gantt page became the Calendar (FR6.1); old links keep working. */}
             <Route path="/gantt" element={<Navigate to="/calendar" replace />} />
             <Route path="/grades" element={<GradesPage />} />
