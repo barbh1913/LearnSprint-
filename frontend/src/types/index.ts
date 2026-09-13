@@ -100,10 +100,35 @@ export interface ScheduleBlock {
   courseName: string | null
 }
 
+export type EventKind = 'study' | 'review' | 'study_aid'
+
+export interface ScheduleEventAction {
+  actionId: string
+  title: string
+  minutes: number
+}
+
+/** A topic on the calendar: its consecutive scheduled subtasks as one entry (ADR 0012). */
+export interface ScheduleEvent {
+  topicId: string | null
+  topicName: string | null
+  kind: EventKind
+  start: string
+  end: string
+  durationMinutes: number
+  label: string
+  actions: ScheduleEventAction[]
+  courseId: string | null
+  courseName: string | null
+}
+
 export interface Schedule {
   feasible: boolean
   isEmergencyMode: boolean
+  /** Per learning action - what the scheduler placed. */
   blocks: ScheduleBlock[]
+  /** Per topic - what the Calendar shows. */
+  events: ScheduleEvent[]
   totalAvailableMinutes: number
   totalNeededMinutes: number
   reason?: string | null
@@ -121,6 +146,7 @@ export interface CourseSchedule extends Schedule {
 export interface StudentPlan {
   courses: CourseSchedule[]
   blocks: ScheduleBlock[]
+  events: ScheduleEvent[]
   totalAvailableMinutes: number
   totalNeededMinutes: number
   sessions: number

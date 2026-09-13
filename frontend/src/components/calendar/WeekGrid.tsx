@@ -1,12 +1,13 @@
 import { cn } from '../../lib/utils'
-import type { ScheduleBlock } from '../../types'
+import type { BlockType } from '../../types'
 import {
   DAY_LABELS,
-  blocksOnDay,
   formatTime,
   isSameDay,
+  itemsOnDay,
   placement,
   weekDays,
+  type CalendarItem,
   type HourRange,
 } from './calendarMath'
 
@@ -18,9 +19,9 @@ const EVENT_GAP_PX = 2
 const FLOOR_EVENT_PX = 4
 const GRID_COLUMNS = 'grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]'
 
-// Same colour language as the board and the old list: green for actions,
-// indigo for the review session, amber for study-aid preparation.
-const BLOCK_STYLES: Record<ScheduleBlock['blockType'], string> = {
+// Same colour language as the board: green for study sessions, indigo for the
+// review session, amber for study-aid preparation.
+const KIND_STYLES: Record<BlockType, string> = {
   action:
     'border-l-emerald-500 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-100 dark:hover:bg-emerald-900/60',
   review:
@@ -31,24 +32,24 @@ const BLOCK_STYLES: Record<ScheduleBlock['blockType'], string> = {
 
 /**
  * One week of the plan as a time grid (FR6.1): seven day columns, one row per
- * hour, each block placed at its planned time. The scheduler guarantees blocks
- * never overlap, so there is no lane-splitting to do.
+ * hour, each topic event placed at its planned time. The scheduler guarantees
+ * sessions never overlap, so there is no lane-splitting to do.
  */
 export function WeekGrid({
   weekStart,
-  blocks,
+  items,
   range,
   today,
   showCourse = false,
-  onSelectBlock,
+  onSelectItem,
 }: {
   weekStart: Date
-  blocks: ScheduleBlock[]
+  items: CalendarItem[]
   range: HourRange
   today: Date
   /** Label each session with its course - on when several courses share the grid. */
   showCourse?: boolean
-  onSelectBlock: (block: ScheduleBlock) => void
+  onSelectItem: (item: CalendarItem) => void
 }) {
   const days = weekDays(weekStart)
   const hours = Array.from(
@@ -118,17 +119,17 @@ export function WeekGrid({
                 />
               ))}
 
-              {layoutDay(blocksOnDay(blocks, day), range).map(({ block, spot, style }, index) => {
-                const timeRange = `${formatTime(block.start)}–${formatTime(block.end)}`
-                const courseLabel = showCourse ? block.courseName : null
+              {layoutDay(itemsOnDay(items, day), range).map(({ item, spot, style }) => {
+                const timeRange = `${formatTime(item.start)}–${formatTime(item.end)}`
+                const courseLabel = showCourse ? item.courseName : null
                 const className = cn(
                   'absolute inset-x-1 overflow-hidden rounded-md border-l-4 px-1.5 py-0.5 text-left text-[11px] leading-tight',
-                  BLOCK_STYLES[block.blockType],
+                  KIND_STYLES[item.kind],
                 )
                 // A session shows as much as its height allows: label, then its course, then its times.
                 const content = (
                   <>
-                    <span className="block truncate font-medium">{block.label}</span>
+                    <span className="block truncate font-medium">{item.label}</span>
                     {courseLabel && spot.height >= 45 && (
                       <span className="block truncate text-[10px] opacity-70">{courseLabel}</span>
                     )}
@@ -137,27 +138,26 @@ export function WeekGrid({
                     )}
                   </>
                 )
-                const description = [block.label, courseLabel, timeRange].filter(Boolean).join(', ')
+                const description = [item.label, courseLabel, timeRange].filter(Boolean).join(', ')
+                const tooltip = item.actionTitles.length > 0
+                  ? `${description} — ${item.actionTitles.join(', ')}`
+                  : description
 
-                // Study-aid blocks belong to no topic, so there is nothing to open.
-                return block.topicId ? (
+                // Study-aid preparation belongs to no topic, so there is nothing to open.
+                return item.topicId ? (
                   <button
-                    key={`${block.start}-${index}`}
+                    key={item.id}
                     type="button"
-                    onClick={() => onSelectBlock(block)}
+                    onClick={() => onSelectItem(item)}
                     aria-label={description}
+                    title={tooltip}
                     className={cn(className, 'cursor-pointer')}
                     style={style}
                   >
                     {content}
                   </button>
                 ) : (
-                  <div
-                    key={`${block.start}-${index}`}
-                    className={className}
-                    style={style}
-                    title={description}
-                  >
+                  <div key={item.id} className={className} style={style} title={tooltip}>
                     {content}
                   </div>
                 )
@@ -170,20 +170,20 @@ export function WeekGrid({
   )
 }
 
-interface LaidOutBlock {
-  block: ScheduleBlock
+interface LaidOutItem {
+  item: CalendarItem
   spot: { top: number; height: number }
   style: { top: number; height: number }
 }
 
-/** Pixel boxes for one day's blocks, earliest first, with no box overrunning the next. */
-function layoutDay(dayBlocks: ScheduleBlock[], range: HourRange): LaidOutBlock[] {
-  const placed = dayBlocks.flatMap((block) => {
-    const spot = placement(block, range)
-    return spot ? [{ block, spot }] : []
+/** Pixel boxes for one day's items, earliest first, with no box overrunning the next. */
+function layoutDay(dayItems: CalendarItem[], range: HourRange): LaidOutItem[] {
+  const placed = dayItems.flatMap((item) => {
+    const spot = placement(item, range)
+    return spot ? [{ item, spot }] : []
   })
 
-  return placed.map(({ block, spot }, index) => {
+  return placed.map(({ item, spot }, index) => {
     const top = (spot.top / 60) * HOUR_PX
     let height = Math.max((spot.height / 60) * HOUR_PX - EVENT_GAP_PX, MIN_EVENT_PX)
 
@@ -193,6 +193,6 @@ function layoutDay(dayBlocks: ScheduleBlock[], range: HourRange): LaidOutBlock[]
       height = Math.min(height, Math.max(nextTop - top - EVENT_GAP_PX, FLOOR_EVENT_PX))
     }
 
-    return { block, spot, style: { top, height } }
+    return { item, spot, style: { top, height } }
   })
 }
