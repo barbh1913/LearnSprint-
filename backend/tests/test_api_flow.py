@@ -606,6 +606,78 @@ class TestSchedule:
 
         assert schedule["feasible"] is False or schedule["isEmergencyMode"] is True
 
+    def test_a_non_member_cannot_view_or_export_the_schedule(self) -> None:
+        owner = auth_headers("schedule-owner@example.com")
+        stranger = auth_headers("schedule-stranger@example.com")
+        course = create_course(owner)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Recursion"}, headers=owner)
+
+        assert (
+            client.get(f"/courses/{course['id']}/schedule", headers=stranger).status_code
+            == 403
+        )
+        assert (
+            client.get(f"/courses/{course['id']}/schedule.ics", headers=stranger).status_code
+            == 403
+        )
+
+    def test_downloading_the_ics_file(self) -> None:
+        headers = auth_headers()
+        course = create_course(headers)
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Recursion"}, headers=headers)
+
+        response = client.get(f"/courses/{course['id']}/schedule.ics", headers=headers)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/calendar")
+        assert "BEGIN:VCALENDAR" in response.text
+        assert "BEGIN:VEVENT" in response.text
+
+    def test_downloading_ics_for_an_infeasible_plan_is_rejected(self) -> None:
+        headers = auth_headers()
+        course = create_course(
+            headers, examDate=(datetime.now() + timedelta(hours=6)).isoformat()
+        )
+        for name in ("A", "B", "C", "D", "E", "F"):
+            client.post(f"/courses/{course['id']}/topics", json={"name": name}, headers=headers)
+        client.put(
+            "/constraints",
+            json={
+                "blockedSlots": [
+                    {"day": day, "startTime": "00:00", "endTime": "23:59"} for day in range(7)
+                ],
+                "timePreference": "evening",
+            },
+            headers=headers,
+        )
+
+        response = client.get(f"/courses/{course['id']}/schedule.ics", headers=headers)
+
+        assert response.status_code == 409
+
+    def test_rating_mastery_reshapes_the_generated_schedule(self) -> None:
+        # End-to-end proof that a mastery change actually recomputes the
+        # schedule through the real wiring, not just the pure domain function
+        # (test_allocation.py already covers the algorithm itself in isolation).
+        headers = auth_headers()
+        course = create_course(headers)
+        weak = client.post(
+            f"/courses/{course['id']}/topics", json={"name": "Weak"}, headers=headers
+        ).json()
+        client.post(f"/courses/{course['id']}/topics", json={"name": "Strong"}, headers=headers)
+
+        before = client.get(f"/courses/{course['id']}/schedule", headers=headers).json()
+        assert _review_minutes(before, "Weak") == _review_minutes(before, "Strong")
+
+        client.patch(
+            f"/topics/{weak['id']}/progress?courseId={course['id']}",
+            json={"masteryLevel": 1},
+            headers=headers,
+        )
+        after = client.get(f"/courses/{course['id']}/schedule", headers=headers).json()
+
+        assert _review_minutes(after, "Weak") > _review_minutes(after, "Strong")
+
 
 class TestVelocity:
     def test_velocity_counts_completed_actions(self) -> None:
@@ -922,3 +994,11 @@ def _add_topic_and_finish_actions(headers: dict[str, str], course_id: str, name:
         )
 
     return client.get(f"/board?courseId={course_id}", headers=headers).json()["cards"][0]
+
+
+def _review_minutes(schedule: dict, topic_name: str) -> int:
+    return sum(
+        block["durationMinutes"]
+        for block in schedule["blocks"]
+        if block["blockType"] == "review" and block["topicName"] == topic_name
+    )
