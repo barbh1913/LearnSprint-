@@ -50,7 +50,11 @@ const materialAnalysis = {
   },
 }
 
-function mockApi({ onPatch, onDelete }: { onPatch?: () => void; onDelete?: () => void } = {}) {
+function mockApi({
+  onPatch,
+  onDelete,
+  cards = [topicCard()],
+}: { onPatch?: () => void; onDelete?: (url: string) => void; cards?: ReturnType<typeof topicCard>[] } = {}) {
   const posts: string[] = []
   vi.stubGlobal(
     'fetch',
@@ -71,7 +75,7 @@ function mockApi({ onPatch, onDelete }: { onPatch?: () => void; onDelete?: () =>
         }
       }
       if (options.method === 'DELETE') {
-        onDelete?.()
+        onDelete?.(url)
         return { ok: true, status: 204, json: async () => undefined }
       }
       if (options.method === 'PATCH') {
@@ -86,7 +90,7 @@ function mockApi({ onPatch, onDelete }: { onPatch?: () => void; onDelete?: () =>
         return { ok: true, status: 200, json: async () => ({}) }
       }
       if (url.includes('/board')) {
-        return { ok: true, status: 200, json: async () => ({ cards: [topicCard()] }) }
+        return { ok: true, status: 200, json: async () => ({ cards }) }
       }
       if (url.endsWith('/courses/c1')) {
         return { ok: true, status: 200, json: async () => course }
@@ -144,6 +148,39 @@ describe('CourseDetailPage', () => {
     fireEvent.click(await screen.findByLabelText('Delete Heaps'))
 
     await waitFor(() => expect(deleted).toBe(true))
+  })
+
+  it('deletes every selected topic after one confirmation', async () => {
+    const deleted: string[] = []
+    mockApi({
+      onDelete: (url) => deleted.push(url),
+      cards: [topicCard(), { ...topicCard(), topicId: 't2', name: 'Tries' }, { ...topicCard(), topicId: 't3', name: 'Graphs' }],
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+
+    fireEvent.click(await screen.findByLabelText('Select Heaps'))
+    fireEvent.click(screen.getByLabelText('Select Graphs'))
+    expect(screen.getByText('2 of 3 selected')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected (2)' }))
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      "Delete 2 topics? This also removes everyone's progress on them.",
+    )
+    await waitFor(() => expect(deleted).toHaveLength(2))
+    expect(deleted.map((url) => url.split('/').pop())).toEqual(['t1', 't3'])
+  })
+
+  it('select all covers every topic and can be cleared', async () => {
+    mockApi({ cards: [topicCard(), { ...topicCard(), topicId: 't2', name: 'Tries' }] })
+    renderPage()
+
+    fireEvent.click(await screen.findByLabelText('Select all topics'))
+    expect(screen.getByText('2 of 2 selected')).toBeInTheDocument()
+    expect(screen.getByLabelText('Select Tries')).toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Select all topics'))
+    expect(screen.queryByRole('button', { name: /Delete selected/ })).not.toBeInTheDocument()
   })
 
   it('analyses one file, shows the decision dialog, and files it where the student chooses', async () => {

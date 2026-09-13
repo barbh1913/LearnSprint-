@@ -39,6 +39,8 @@ export function CourseDetailPage() {
   const [uploadNote, setUploadNote] = useState('')
   const [analysis, setAnalysis] = useState<MaterialAnalysis | null>(null)
   const [syllabus, setSyllabus] = useState<SyllabusAnalysis | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isDeletingSelected, setIsDeletingSelected] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const singleFileInput = useRef<HTMLInputElement>(null)
   const syllabusInput = useRef<HTMLInputElement>(null)
@@ -51,6 +53,11 @@ export function CourseDetailPage() {
       ])
       setCourse(loadedCourse)
       setCards(board.cards)
+      // A topic another member deleted meanwhile must not stay selected.
+      setSelectedIds((current) => {
+        const stillThere = new Set(board.cards.map((card) => card.topicId))
+        return new Set([...current].filter((id) => stillThere.has(id)))
+      })
       setError('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load the course')
@@ -190,6 +197,41 @@ export function CourseDetailPage() {
     runMutation(() => api.deleteTopic(courseId, card.topicId))
   }
 
+  function toggleSelected(topicId: string, isSelected: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (isSelected) next.add(topicId)
+      else next.delete(topicId)
+      return next
+    })
+  }
+
+  function toggleSelectAll(isSelected: boolean) {
+    setSelectedIds(isSelected ? new Set(cards.map((card) => card.topicId)) : new Set())
+  }
+
+  /** Bulk delete: one confirmation, then the same per-topic delete the trash icon uses (FR2.2). */
+  async function handleDeleteSelected() {
+    const chosen = cards.filter((card) => selectedIds.has(card.topicId))
+    if (chosen.length === 0) return
+    const what = chosen.length === 1 ? `"${chosen[0].name}"` : `${chosen.length} topics`
+    if (!confirm(`Delete ${what}? This also removes everyone's progress on them.`)) return
+
+    setIsDeletingSelected(true)
+    setError('')
+    try {
+      for (const card of chosen) {
+        await api.deleteTopic(courseId, card.topicId)
+      }
+      setSelectedIds(new Set())
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Some topics could not be deleted')
+    } finally {
+      setIsDeletingSelected(false)
+      await load()
+    }
+  }
+
   function handleToggleAction(actionId: string, isDone: boolean) {
     runMutation(() => api.setActionDone(courseId, actionId, isDone))
   }
@@ -325,10 +367,38 @@ export function CourseDetailPage() {
         />
       ) : (
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={selectedIds.size === cards.length}
+                onChange={(event) => toggleSelectAll(event.target.checked)}
+                aria-label="Select all topics"
+                className="size-4 rounded border-border accent-indigo-600"
+              />
+              {selectedIds.size === 0
+                ? `${cards.length} topics`
+                : `${selectedIds.size} of ${cards.length} selected`}
+            </label>
+            {selectedIds.size > 0 && (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => void handleDeleteSelected()}
+                disabled={isDeletingSelected}
+              >
+                <Trash2 className="size-4" aria-hidden />
+                {isDeletingSelected ? 'Deleting' : `Delete selected (${selectedIds.size})`}
+              </Button>
+            )}
+          </div>
+
           {cards.map((card) => (
             <TopicRow
               key={card.topicId}
               card={card}
+              isSelected={selectedIds.has(card.topicId)}
+              onSelect={(isSelected) => toggleSelected(card.topicId, isSelected)}
               onRename={(name) => handleRename(card, name)}
               onTogglePriority={() => handleTogglePriority(card)}
               onDelete={() => handleDeleteTopic(card)}
@@ -363,6 +433,8 @@ export function CourseDetailPage() {
 
 function TopicRow({
   card,
+  isSelected,
+  onSelect,
   onRename,
   onTogglePriority,
   onDelete,
@@ -370,6 +442,8 @@ function TopicRow({
   onMastery,
 }: {
   card: BoardCard
+  isSelected: boolean
+  onSelect: (isSelected: boolean) => void
   onRename: (name: string) => void
   onTogglePriority: () => void
   onDelete: () => void
@@ -379,8 +453,15 @@ function TopicRow({
   const [name, setName] = useState(card.name)
 
   return (
-    <Card>
+    <Card className={isSelected ? 'ring-2 ring-indigo-300 dark:ring-indigo-800' : undefined}>
       <div className="flex flex-wrap items-start justify-between gap-3">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(event) => onSelect(event.target.checked)}
+          aria-label={`Select ${card.name}`}
+          className="mt-1 size-4 rounded border-border accent-indigo-600"
+        />
         <div className="min-w-0 flex-1">
           <input
             value={name}
