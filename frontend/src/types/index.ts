@@ -72,6 +72,8 @@ export interface ScheduleBlock {
   topicId: string | null
   topicName: string | null
   actionType: ActionType | null
+  /** Set for action blocks only, so the calendar can open the exact action. */
+  actionId: string | null
   label: string
 }
 

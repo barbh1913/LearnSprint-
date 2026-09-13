@@ -58,6 +58,39 @@ def make_topic(
     )
 
 
+class TestBlockIdentity:
+    """The calendar opens the exact action behind an event (FR6.1), so action blocks must say which one."""
+
+    def test_action_blocks_carry_their_action_id(self) -> None:
+        topic = make_topic("t1")
+        schedule = generate_schedule(
+            now=NOW,
+            exam_date=NOW.replace(day=NOW.day + 14),
+            topics=[topic],
+            blocked_slots=[],
+            time_preference=TimePreference.EVENING,
+        )
+
+        assert isinstance(schedule, Schedule)
+        action_blocks = [b for b in schedule.blocks if b.block_type == BlockType.ACTION]
+        assert action_blocks
+        assert {b.action_id for b in action_blocks} == {a.action_id for a in topic.pending_actions}
+
+    def test_review_blocks_belong_to_no_single_action(self) -> None:
+        schedule = generate_schedule(
+            now=NOW,
+            exam_date=NOW.replace(day=NOW.day + 14),
+            topics=[make_topic("t1")],
+            blocked_slots=[],
+            time_preference=TimePreference.EVENING,
+        )
+
+        assert isinstance(schedule, Schedule)
+        review_blocks = [b for b in schedule.blocks if b.block_type == BlockType.REVIEW]
+        assert review_blocks
+        assert all(b.action_id is None for b in review_blocks)
+
+
 class TestReviewWeights:
     def test_lower_mastery_gets_more_weight(self) -> None:
         weights = compute_review_weights([make_topic("weak", mastery=1), make_topic("strong", mastery=5)])

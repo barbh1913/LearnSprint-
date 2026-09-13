@@ -1,4 +1,4 @@
-"""Schedule endpoint (FR3.1-FR3.3, and the data behind the Gantt view FR6.1)."""
+"""Schedule endpoint (FR3.1-FR3.3, and the data behind the Calendar view FR6.1)."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ class BlockOut(BaseModel):
     topicId: str | None
     topicName: str | None
     actionType: str | None
+    actionId: str | None = None
     label: str
 
 
@@ -77,6 +78,7 @@ def get_schedule(course_id: str, user_id: str = Depends(get_current_user_id)) ->
                 topicId=block.topic_id,
                 topicName=block.topic_name,
                 actionType=block.action_type.value if block.action_type else None,
+                actionId=block.action_id,
                 label=block.label,
             )
             for block in result.blocks
