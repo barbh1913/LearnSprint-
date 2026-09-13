@@ -109,7 +109,7 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 **Precondition:** the course has an exam date and unfinished topics.
 **Main flow:**
 1. Student opens the study plan for a course.
-2. System finds the free windows between now and the exam.
+2. System finds the free windows between now and the exam — minus the sessions already planned for any course whose exam comes earlier (FR3.1: one plan per student, nearest exam first).
 3. System schedules each unfinished learning action, weakest topics first.
 4. System adds a final review session, splitting its time **inversely by mastery** — a topic rated 1 gets far more review time than one rated 5.
 5. If the exam allows open material or a formula sheet, System reserves time to prepare those aids.
@@ -118,6 +118,7 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 **Alternative flows:**
 - *Not enough time for the full plan ("the exam is tomorrow")* — System switches to **emergency mode**: it drops the individual read/summarise/quiz actions and produces one condensed review session split **equally** across topics, and says so.
 - *Not enough time even for that* — System reports the plan as infeasible and states how many more free minutes are needed, rather than quietly producing an impossible schedule.
+- *Another course's exam comes first* — that course's sessions take the hours first and this course is planned into what remains; if it no longer fits, the emergency or infeasibility outcome is reported for this course specifically, never by squeezing the two together.
 - *No exam date set* — System asks for one (400).
 
 **Postcondition:** the Student has concrete time blocks. The plan is recomputed on each request and never stored ([ADR 0005](adr/0005-schedule-not-persisted.md)).
@@ -184,8 +185,8 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 1. Student opens the Calendar and chooses "Connect Google Calendar".
 2. System sends the Student to Google's consent screen — a separate consent from Google sign-in ([ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md)); the Student grants access.
 3. System stores the credential and creates a calendar named "LearnSprint" in the Student's Google account.
-4. Student chooses "Sync now" for a course.
-5. System recomputes the plan (UC7) and replaces that course's sessions in the LearnSprint calendar with it — other courses already synced there stay as they are.
+4. Student chooses "Sync now" — for all courses, or for the one the Calendar is filtered to.
+5. System recomputes the plan (UC7) and replaces each synced course's sessions in the LearnSprint calendar with it — courses not included in the sync stay as they are.
 
 **Alternative flows:**
 - *Consent denied or cancelled* — nothing is stored; the Calendar shows "Not connected".
