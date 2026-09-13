@@ -24,17 +24,30 @@ BLOCK_DESCRIPTIONS = {
 
 
 def schedule_to_ics(schedule: Schedule, *, course_name: str) -> str:
-    """Render the schedule as an iCalendar document."""
+    """Render one course's schedule as an iCalendar document."""
+    return plan_to_ics([(course_name, schedule)], calendar_name=f"{course_name} study plan")
+
+
+def plan_to_ics(named_schedules: list[tuple[str, Schedule]], *, calendar_name: str) -> str:
+    """Render several courses' schedules as one iCalendar document, in time order.
+
+    Each event is tagged with its course in CATEGORIES, which is how the
+    student tells them apart once imported.
+    """
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//LearnSprint//Study Planner//EN",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{_escape(course_name)} study plan",
+        f"X-WR-CALNAME:{_escape(calendar_name)}",
     ]
 
-    for index, block in enumerate(schedule.blocks):
+    events = sorted(
+        ((block, course_name) for course_name, schedule in named_schedules for block in schedule.blocks),
+        key=lambda item: item[0].start,
+    )
+    for index, (block, course_name) in enumerate(events):
         lines.extend(
             [
                 "BEGIN:VEVENT",

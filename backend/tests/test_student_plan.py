@@ -131,6 +131,95 @@ class TestCombinedPlan:
         # Both requests land inside the same 5-minute slot, so the plans are identical.
         assert schedule_of(headers, soon)["blocks"] == schedule_of(headers, soon)["blocks"]
 
+    def test_the_all_courses_plan_lists_every_course_nearest_exam_first(self) -> None:
+        headers = auth_headers()
+        later = create_course(headers, "OOP", "Classes", exam_in_days=30)
+        soon = create_course(headers, "Data Structures", "Trees", "Graphs", exam_in_days=10)
+        create_course(headers, "Reading Group", "Papers", exam_in_days=None)
+
+        response = client.get("/schedule", headers=headers)
+
+        assert response.status_code == 200, response.text
+        plan = response.json()
+        assert [course["courseId"] for course in plan["courses"]] == [soon["id"], later["id"]]
+        assert plan["courses"][0]["courseName"] == "Data Structures"
+        assert plan["courses"][0]["examDate"].startswith(soon["examDate"][:10])
+        assert plan["sessions"] == len(plan["blocks"]) > 0
+
+    def test_the_all_courses_blocks_are_merged_in_time_order_and_labelled(self) -> None:
+        headers = auth_headers()
+        create_course(headers, "OOP", "Classes", exam_in_days=30)
+        create_course(headers, "Data Structures", "Trees", exam_in_days=10)
+
+        plan = client.get("/schedule", headers=headers).json()
+
+        starts = [block["start"] for block in plan["blocks"]]
+        assert starts == sorted(starts)
+        assert {block["courseName"] for block in plan["blocks"]} == {"Data Structures", "OOP"}
+        assert all(block["courseId"] for block in plan["blocks"])
+        per_course = sum(len(course["blocks"]) for course in plan["courses"])
+        assert len(plan["blocks"]) == per_course
+
+    def test_the_all_courses_metrics_cover_every_displayed_course(self) -> None:
+        headers = auth_headers()
+        create_course(headers, "OOP", "Classes", exam_in_days=30)
+        create_course(headers, "Data Structures", "Trees", exam_in_days=10)
+
+        plan = client.get("/schedule", headers=headers).json()
+
+        assert plan["totalNeededMinutes"] == sum(c["totalNeededMinutes"] for c in plan["courses"])
+        # Free time until the latest exam is at least what any single course saw.
+        assert plan["totalAvailableMinutes"] >= max(c["totalAvailableMinutes"] for c in plan["courses"])
+
+    def test_the_single_course_slice_matches_the_all_courses_plan(self) -> None:
+        headers = auth_headers()
+        create_course(headers, "OOP", "Classes", exam_in_days=30)
+        soon = create_course(headers, "Data Structures", "Trees", exam_in_days=10)
+
+        plan = client.get("/schedule", headers=headers).json()
+        alone = schedule_of(headers, soon)
+
+        from_plan = next(c for c in plan["courses"] if c["courseId"] == soon["id"])
+        assert alone["blocks"] == from_plan["blocks"]
+        assert alone["blocks"][0]["courseName"] == "Data Structures"
+
+    def test_an_empty_plan_is_empty_not_an_error(self) -> None:
+        headers = auth_headers()
+
+        plan = client.get("/schedule", headers=headers).json()
+
+        assert plan == {
+            "courses": [],
+            "blocks": [],
+            "totalAvailableMinutes": 0,
+            "totalNeededMinutes": 0,
+            "sessions": 0,
+        }
+
+    def test_the_plan_requires_a_signed_in_student(self) -> None:
+        assert client.get("/schedule").status_code == 401
+
+
+class TestAllCoursesIcs:
+    def test_exports_every_course_that_fits(self) -> None:
+        headers = auth_headers()
+        create_course(headers, "OOP", "Classes", exam_in_days=30)
+        create_course(headers, "Data Structures", "Trees", exam_in_days=10)
+
+        response = client.get("/schedule.ics", headers=headers)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/calendar")
+        assert 'filename="learnsprint-study-plan.ics"' in response.headers["content-disposition"]
+        assert "CATEGORIES:OOP" in response.text
+        assert "CATEGORIES:Data Structures" in response.text
+
+    def test_nothing_to_export_when_no_plan_fits(self) -> None:
+        headers = auth_headers()
+        create_course(headers, "Reading Group", "Papers", exam_in_days=None)
+
+        assert client.get("/schedule.ics", headers=headers).status_code == 409
+
     def test_another_students_courses_do_not_take_my_hours(self) -> None:
         mine = auth_headers("me@example.com")
         theirs = auth_headers("them@example.com")

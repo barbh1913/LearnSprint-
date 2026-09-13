@@ -18,7 +18,11 @@ from typing import Any
 from features.academic_profile.infrastructure import repository as course_repo
 from features.content_topics.infrastructure import repository as topic_repo
 from features.progress.infrastructure import repository as progress_repo
-from features.scheduling.domain.allocation import generate_schedule, round_up_to_slot
+from features.scheduling.domain.allocation import (
+    find_available_windows,
+    generate_schedule,
+    round_up_to_slot,
+)
 from features.scheduling.domain.models import (
     ActionType,
     BlockedSlot,
@@ -45,8 +49,18 @@ class CoursePlan:
     result: SchedulingResult
 
 
-def build_plan_for_student(user_id: str, *, now: datetime | None = None) -> list[CoursePlan]:
+@dataclass(frozen=True)
+class StudentPlan:
     """Every schedulable course, in the order it was given the hours: nearest exam first."""
+
+    courses: list[CoursePlan]
+    planned_from: datetime
+    # Free study minutes from now to the latest exam, before any course took them -
+    # the "free time" figure for the all-courses view.
+    total_available_minutes: int
+
+
+def build_plan_for_student(user_id: str, *, now: datetime | None = None) -> StudentPlan:
     # Naive local time throughout: blocked slots are wall-clock ("09:00"), so
     # mixing in a UTC-aware `now` would compare apples to oranges.
     moment = round_up_to_slot(now or datetime.now())
@@ -76,17 +90,34 @@ def build_plan_for_student(user_id: str, *, now: datetime | None = None) -> list
                 result=result,
             )
         )
-    return plans
+
+    return StudentPlan(
+        courses=plans,
+        planned_from=moment,
+        total_available_minutes=_free_minutes_until(
+            max((plan.exam_date for plan in plans), default=moment), constraints, now=moment
+        ),
+    )
 
 
 def build_schedule_for_course(
     user_id: str, course_id: str, *, now: datetime | None = None
 ) -> SchedulingResult:
     """This course's slice of the combined plan - the same times the all-courses view shows."""
-    for plan in build_plan_for_student(user_id, now=now):
+    for plan in build_plan_for_student(user_id, now=now).courses:
         if plan.course_id == course_id:
             return plan.result
     raise CourseNotScheduled(course_id)
+
+
+def _free_minutes_until(exam_date: datetime, constraints: dict[str, Any], *, now: datetime) -> int:
+    windows = find_available_windows(
+        now=now,
+        exam_date=exam_date,
+        blocked_slots=[_to_blocked_slot(slot) for slot in constraints.get("blockedSlots", [])],
+        time_preference=TimePreference(constraints.get("timePreference", "evening")),
+    )
+    return sum(int((end - start).total_seconds() // 60) for start, end in windows)
 
 
 def _scheduling_order(course: dict[str, Any]) -> tuple[datetime, str, str]:

@@ -354,6 +354,55 @@ class TestSyncing:
         assert response.status_code == 502
         assert client.get("/integrations/google-calendar/status", headers=headers).json()["lastSyncedAt"] is None
 
+    def test_syncing_without_a_course_writes_every_course_that_fits(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        first = create_course_with_topics(headers, "Trees")
+        second = create_course_with_topics(headers, "Sorting", exam_in_days=30)
+        connect(headers)
+
+        response = client.post("/integrations/google-calendar/sync", headers=headers)
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert {c["courseId"] for c in body["courses"]} == {first["id"], second["id"]}
+        assert all(c["skipped"] is None and c["synced"] > 0 for c in body["courses"])
+        assert body["synced"] == sum(c["synced"] for c in body["courses"]) == len(google.calendar_events())
+        tags = {e["extendedProperties"]["private"]["learnsprintCourseId"] for e in google.calendar_events()}
+        assert tags == {first["id"], second["id"]}
+
+    def test_a_course_that_does_not_fit_is_skipped_with_a_reason(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        fits = create_course_with_topics(headers, "Trees", exam_in_days=21)
+        # Exam in an hour with several topics: not even a crash review fits.
+        squeezed = create_course_with_topics(headers, "A", "B", "C", "D", exam_in_days=0)
+        connect(headers)
+
+        body = client.post("/integrations/google-calendar/sync", headers=headers).json()
+
+        by_id = {c["courseId"]: c for c in body["courses"]}
+        assert by_id[fits["id"]]["synced"] > 0
+        assert by_id[squeezed["id"]]["synced"] == 0
+        assert "fit" in by_id[squeezed["id"]]["skipped"]
+
+    def test_syncing_everything_is_refused_when_nothing_fits(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        create_course_with_topics(headers, "A", "B", "C", "D", exam_in_days=0)
+        connect(headers)
+
+        response = client.post("/integrations/google-calendar/sync", headers=headers)
+
+        assert response.status_code == 409
+        assert google.calendar_events() == []
+
+    def test_syncing_everything_with_no_dated_course_is_refused(self, google: FakeGoogle) -> None:
+        headers = auth_headers()
+        connect(headers)
+
+        response = client.post("/integrations/google-calendar/sync", headers=headers)
+
+        assert response.status_code == 409
+        assert "exam date" in response.json()["detail"]
+
     def test_cannot_sync_someone_elses_course(self, google: FakeGoogle) -> None:
         owner = auth_headers("owner@example.com")
         course = create_course_with_topics(owner, "Trees")
