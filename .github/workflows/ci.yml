@@ -1,9 +1,9 @@
 name: CI
 
+# Every push on every branch, plus pull requests - so a feature branch is
+# checked before it is merged, not only after it lands on main.
 on:
   push:
-    branches:
-      - main
   pull_request:
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
         run: pytest -q
 
   frontend:
-    name: Frontend tests and typecheck
+    name: Frontend typecheck, lint, tests and build
     runs-on: ubuntu-latest
 
     steps:
@@ -61,3 +61,9 @@ jobs:
       - name: Run tests
         working-directory: frontend
         run: npm run test
+
+      # The same build the deploy workflow ships, so a broken production
+      # bundle fails here first instead of on the way to S3.
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
