@@ -370,7 +370,7 @@ export function CalendarPage() {
 
       <TopicDetailDialog
         card={selected ? (cardsByTopic.get(selected.topicId) ?? null) : null}
-        highlightActionId={selected?.actionId ?? null}
+        highlightActionIds={selected?.actionId ? [selected.actionId] : []}
         onClose={() => setSelected(null)}
         onChanged={loadPlan}
       />

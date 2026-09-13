@@ -20,22 +20,40 @@ export interface Course {
 
 export type ExamType = 'closed' | 'open_material' | 'formula_sheet'
 
+export type Priority = 'low' | 'medium' | 'high'
+
 export interface Topic {
   id: string
   courseId: string
   name: string
+  description: string | null
+  priority: Priority
+  /** Derived: priority === 'high'. Kept for older readers. */
   isPriority: boolean
 }
 
-export type ActionType = 'read' | 'summarize' | 'quiz'
+/** A file the student attached to a topic (FR2.9). Private to its uploader. */
+export interface Material {
+  id: string
+  topicId: string
+  fileName: string
+  fileType: string
+  sizeBytes: number
+  uploadedAt: string
+}
+
+export type ActionType = 'read' | 'summarize' | 'quiz' | 'custom'
 
 export type TopicStatus = 'backlog' | 'todo' | 'in_progress' | 'needs_review' | 'done'
 
 export type MasteryLevel = 1 | 2 | 3 | 4 | 5
 
+/** A subtask of a topic (FR2.3): the three defaults plus whatever the student added. */
 export interface BoardAction {
   id: string
   type: ActionType
+  title: string
+  order: number
   durationMinutes: number
   isDone: boolean
 }
@@ -46,6 +64,8 @@ export interface BoardCard {
   courseId: string
   courseName: string
   name: string
+  description: string | null
+  priority: Priority
   isPriority: boolean
   masteryLevel: MasteryLevel | null
   status: TopicStatus
@@ -211,4 +231,13 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   read: 'Read',
   summarize: 'Summarize',
   quiz: 'Quiz',
+  custom: 'Subtask',
+}
+
+export const PRIORITY_ORDER: Priority[] = ['low', 'medium', 'high']
+
+export const PRIORITY_LABELS: Record<Priority, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
 }

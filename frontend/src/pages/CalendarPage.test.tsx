@@ -72,14 +72,16 @@ const card = (topicId: string, courseId: string, courseName: string, name: strin
   courseId,
   courseName,
   name,
+  description: null,
+  priority: 'medium',
   isPriority: false,
   masteryLevel: null,
   status: 'todo',
   needsMasteryRating: false,
   actions: [
-    { id: actionId, type: 'read', durationMinutes: 60, isDone: false },
-    { id: `${actionId}-s`, type: 'summarize', durationMinutes: 30, isDone: false },
-    { id: `${actionId}-q`, type: 'quiz', durationMinutes: 30, isDone: false },
+    { id: actionId, type: 'read', title: 'Read', order: 0, durationMinutes: 60, isDone: false },
+    { id: `${actionId}-s`, type: 'summarize', title: 'Summarize', order: 1, durationMinutes: 30, isDone: false },
+    { id: `${actionId}-q`, type: 'quiz', title: 'Quiz', order: 2, durationMinutes: 30, isDone: false },
   ],
   actionsDone: 0,
   totalMinutes: 120,
@@ -121,6 +123,7 @@ function mockApi(responses: Record<string, unknown>) {
 
 const defaultResponses = {
   '/courses': [dataStructures, oop],
+  '/courses/c2/topics/t2/materials': [],
   '/schedule': plan,
   '/courses/c1/schedule': singleSchedule,
   '/board': board,
