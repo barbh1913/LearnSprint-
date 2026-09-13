@@ -260,8 +260,9 @@ def _build_full_schedule(
                     topic_id=topic.topic_id,
                     topic_name=topic.name,
                     action_type=action.action_type,
-                    label=f"{action.action_type.value.capitalize()}: {topic.name}",
+                    label=f"{action.display_title}: {topic.name}",
                     action_id=action.action_id,
+                    action_title=action.display_title,
                 )
             )
 
@@ -348,6 +349,7 @@ class _BlockRequest:
         "action_type",
         "label",
         "action_id",
+        "action_title",
     )
 
     def __init__(
@@ -359,6 +361,7 @@ class _BlockRequest:
         action_type: object | None,
         label: str,
         action_id: str | None = None,
+        action_title: str | None = None,
     ) -> None:
         self.minutes = minutes
         self.block_type = block_type
@@ -367,6 +370,7 @@ class _BlockRequest:
         self.action_type = action_type
         self.label = label
         self.action_id = action_id
+        self.action_title = action_title
 
 
 def _place_blocks(
@@ -406,6 +410,7 @@ def _place_blocks(
                     action_type=request.action_type,  # type: ignore[arg-type]
                     label=request.label,
                     action_id=request.action_id,
+                    action_title=request.action_title,
                 )
             )
             cursor = block_end

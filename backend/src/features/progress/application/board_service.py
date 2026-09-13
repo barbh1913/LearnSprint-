@@ -91,6 +91,8 @@ def _build_card(
         {
             "id": action["id"],
             "type": action["type"],
+            "title": action["title"],
+            "order": action["order"],
             "durationMinutes": action.get("defaultDurationMinutes", 30),
             "isDone": action["id"] in done_action_ids,
         }
@@ -105,7 +107,9 @@ def _build_card(
         "courseId": course_id,
         "courseName": course_name,
         "name": topic["name"],
-        "isPriority": topic.get("isPriority", False),
+        "description": topic.get("description"),
+        "priority": topic["priority"],
+        "isPriority": topic["isPriority"],
         "masteryLevel": mastery,
         "status": status_rules.derive_status(
             actions_done=actions_done,
