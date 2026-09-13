@@ -14,7 +14,9 @@ from shared.config import settings
 
 AI = "ai"
 HEURISTIC = "heuristic"
-MAX_HEURISTIC_KEY_POINTS = 8
+# One file is one academic unit: one topic, with a handful of key points inside
+# it - never one topic per heading (FR2.8).
+MAX_KEY_POINTS = 5
 MAX_HEURISTIC_LECTURES = 30
 
 
@@ -23,11 +25,12 @@ def understand(lines: list[str], *, file_name: str) -> tuple[MaterialContent, st
     if settings.system_anthropic_api_key:
         try:
             understood = ai_extractor.understand_material(lines, api_key=settings.system_anthropic_api_key)
+            key_points = [point.strip() for point in understood.key_points if point.strip()]
             return (
                 MaterialContent(
                     title=understood.title.strip(),
                     summary=understood.summary.strip() or None,
-                    key_points=tuple(point.strip() for point in understood.key_points if point.strip()),
+                    key_points=tuple(key_points[:MAX_KEY_POINTS]),
                     topics=tuple(topic.strip() for topic in understood.topics if topic.strip()),
                     estimated_minutes=understood.estimated_minutes,
                     language=understood.language,
@@ -69,14 +72,21 @@ def propose_lectures(lines: list[str]) -> tuple[list[MaterialContent], str, str 
 
 
 def _heuristic_material(lines: list[str], file_name: str) -> MaterialContent:
-    """Without AI: the document's headings are its key points, the first one (or the file name) its title."""
-    headings = [topic.name for topic in extract_topics(lines)]
-    title = headings[0] if headings else _title_from_file_name(file_name)
+    """Without AI: the first heading (or the file name) is the unit's title; the
+    strongest of the remaining headings, in document order, are its key points.
+
+    Every heading still feeds the matcher (`topics`) - that is evidence of what
+    the file covers, not a proposal to create anything.
+    """
+    headings = extract_topics(lines)
+    title = headings[0].name if headings else _title_from_file_name(file_name)
+    strongest = sorted(headings[1:], key=lambda heading: heading.score, reverse=True)[:MAX_KEY_POINTS]
+    key_points = [heading.name for heading in headings[1:] if heading in strongest]
     return MaterialContent(
         title=title,
         summary=None,
-        key_points=tuple(headings[:MAX_HEURISTIC_KEY_POINTS]),
-        topics=tuple(headings),
+        key_points=tuple(key_points),
+        topics=tuple(heading.name for heading in headings),
         estimated_minutes=None,
         language=detect_language(" ".join(lines[:50])),
     )

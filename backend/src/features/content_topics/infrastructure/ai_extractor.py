@@ -69,11 +69,17 @@ class AiAnalysisUnavailable(Exception):
 
 MATERIAL_PROMPT = """You describe one piece of university course material so a study planner can file it.
 
-Given the raw text of a lecture deck, exercise sheet, notes or a chapter, work out:
-- a short title for what it covers, in the material's own language (never translate),
+The file is ONE academic unit - one lecture, one exercise sheet, one chapter -
+and becomes ONE study topic. Never split it into a topic per slide, heading or
+section; those belong inside the unit as key points.
+
+Given its raw text, work out:
+- a short title for the unit as a whole, in the material's own language (never translate),
 - a summary of two to four sentences a student could revise from,
-- three to eight key points - the concepts, methods or results it actually teaches,
-- the study topics it covers, as short names,
+- one to five key points - the main concepts, methods or results it teaches,
+  each a meaningful subtopic rather than a slide title,
+- the study topics it touches, as short names (used only to match it against the
+  course's existing topics),
 - how many minutes an average student needs to read and understand it, based on
   how much real content there is,
 - the two-letter language code of the material (he or en).
@@ -96,12 +102,12 @@ structure, return its few main units rather than inventing lectures."""
 
 
 class MaterialUnderstanding(BaseModel):
-    """What one file is about."""
+    """What one file - one academic unit, one topic - is about."""
 
-    title: str = Field(description="Short title for the material, in its own language")
+    title: str = Field(description="Short title for the unit as a whole, in its own language")
     summary: str = Field(description="Two to four sentences a student could revise from")
-    key_points: list[str] = Field(description="Three to eight concepts, methods or results it teaches")
-    topics: list[str] = Field(description="Short names of the study topics it covers")
+    key_points: list[str] = Field(description="One to five main concepts, methods or results it teaches")
+    topics: list[str] = Field(description="Short names of the study topics it touches, for matching")
     estimated_minutes: int = Field(ge=10, le=600, description="Minutes an average student needs for it")
     language: str = Field(description="Two-letter language code, he or en")
 
