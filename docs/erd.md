@@ -25,7 +25,6 @@ erDiagram
     USER {
         string id PK
         string email
-        string passwordHash
         string createdAt
     }
     COURSE {
@@ -106,7 +105,7 @@ This is a structural guarantee, not a UI filter. There is no `finalGrade` column
 
 ## Two ways in, one account
 
-`USER.passwordHash` is absent for accounts created by Google sign-in — they authenticate through Cognito and have no password. Both login methods resolve to the same `USER` record by email, so nothing else in the model ever sees which one was used ([ADR 0007](adr/0007-google-sign-in-via-cognito.md)).
+`USER` holds no credential. Passwords and the Google link live in the Cognito user pool ([ADR 0014](adr/0014-cognito-as-the-single-identity-provider.md)); the table keeps only the LearnSprint profile — id, email, when it was created — and the academic data hanging off it. Both sign-in methods resolve to the same `USER` record by email, so nothing else in the model ever sees which one was used ([ADR 0007](adr/0007-google-sign-in-via-cognito.md)). Deleting an account removes every row under `USER#<userId>`, the courses that user owns (with every member's progress and materials on them), the user's own materials elsewhere, and then the Cognito user.
 
 ## Single-table key design
 

@@ -32,7 +32,7 @@ The system is a physically separated frontend and backend, deployed serverless o
   - **Infrastructure** — DB access, text extraction from files, AWS adapters (auth, storage).
   - **Presentation** — FastAPI routers locally, Lambda handlers in production; both thin, no business logic.
 - **Persistence**: a single DynamoDB table, `LearnSprint` (composite `PK`/`SK` + one GSI). There is no local database — development runs against the real table; see [ADR 0006](docs/adr/0006-dynamodb-single-table.md) and [docs/erd.md](docs/erd.md) for the key design. Tests run against an in-memory fake and stay fully offline.
-- **Auth**: the app's own email/password JWT, plus Google sign-in through the existing Cognito user pool (PKCE, `id_token`). Both resolve through one `get_current_user` dependency and map to one account per email — see [ADR 0007](docs/adr/0007-google-sign-in-via-cognito.md). Feature code never knows which was used.
+- **Auth**: AWS Cognito is the single identity provider — the user pool holds both email/password accounts and Google sign-in. Password registration, login, forgot/reset password, change password and account deletion call Cognito from the backend (`shared/auth/cognito_users.py`); Google sign-in uses the hosted UI (PKCE, `id_token`). After Cognito accepts the credentials the backend issues its own session JWT, so both paths resolve through one `get_current_user` dependency and map to one account per email — see [ADR 0007](docs/adr/0007-google-sign-in-via-cognito.md) and [ADR 0014](docs/adr/0014-cognito-as-the-single-identity-provider.md). DynamoDB stores no credential — only the profile and the academic data. Feature code never knows which sign-in was used.
 - **Deployment**: live — React build on S3 + CloudFront; the backend behind `mangum` as six per-feature Lambdas (one per `features/*` module, plus one for `shared/auth`), routed through the account's existing API Gateway by exact route; the same DynamoDB table; a private S3 bucket for uploaded material, one key per file under `{userId}/{courseId}/...`. Both halves redeploy automatically on push via GitHub Actions (OIDC, no long-lived AWS keys in CI). See [ADR 0008](docs/adr/0008-deployed-to-aws.md), [ADR 0009](docs/adr/0009-split-into-per-feature-lambdas.md), and [docs/deployment-setup.md](docs/deployment-setup.md) for URLs and redeploy details.
 - **Testing**: `pytest` for the backend (heaviest on the Domain layer, especially the FR3.2 algorithm), Vitest + React Testing Library for the frontend.
 - Clean, readable code: meaningful names, small focused functions, no comments that explain "what" (the code itself should be clear) — comments only when there's a non-obvious reason.
@@ -97,7 +97,7 @@ Manual drags are an override, not the primary mechanism — the system still der
 
 Full use cases with alternative flows and postconditions: **[docs/use-cases.md](docs/use-cases.md)**.
 
-UC1 register/sign in · UC2 define time constraints · UC3 set up a course · UC4 upload material and extract topics · UC5 analyse one file into the right topic · UC6 **plan the weekly sprint** (the core loop) · UC7 generate a study plan · UC8 study and record progress · UC9 track grades and progress · UC10–UC12 Study Groups · UC13 connect and sync Google Calendar · UC14 analyse a syllabus into lecture topics.
+UC1 register, sign in and manage the account · UC2 define time constraints · UC3 set up a course · UC4 upload material and extract topics · UC5 analyse one file into the right topic · UC6 **plan the weekly sprint** (the core loop) · UC7 generate a study plan · UC8 study and record progress · UC9 track grades and progress · UC10–UC12 Study Groups · UC13 connect and sync Google Calendar · UC14 analyse a syllabus into lecture topics.
 
 ## Data Dictionary
 
@@ -105,7 +105,7 @@ Full data model and DynamoDB key design: [docs/erd.md](docs/erd.md). Some data i
 
 | Entity | Fields | Shared / Private |
 |---|---|---|
-| **User** | `id`, `email`, `passwordHash`, `createdAt` | Private (account record; owns everything else via `userId` FKs) |
+| **User** | `id`, `email`, `createdAt` | Private (the LearnSprint profile; owns everything else via `userId` FKs). The credential lives in Cognito, never here (ADR 0014) |
 | **Course** | `id`, `name`, `year`, `semester`, `credits`, `topics: Topic[]` | Shared (course content only — no grade, no owner field) |
 | **CourseMembership** | `userId`, `courseId`, `role: 'owner' \| 'member'`, `finalGrade?` | Private (one row per user per course; also what makes them a course/group member) |
 | **Topic** | `id`, `courseId`, `name`, `description?`, `priority: 'low' \| 'medium' \| 'high'`, `actions: Action[]` | Shared |

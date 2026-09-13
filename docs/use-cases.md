@@ -6,20 +6,24 @@ UC1–UC9 cover the single-user core. UC10–UC12 cover Study Groups, which were
 
 ---
 
-## UC1 — Register and sign in
+## UC1 — Register, sign in and manage the account
 
-**Requirement:** authentication foundation
+**Requirement:** authentication foundation ([ADR 0014](adr/0014-cognito-as-the-single-identity-provider.md))
 **Precondition:** none
 **Main flow:**
-1. Student enters an email and a password of at least 8 characters.
-2. System creates the account and returns a signed token.
+1. Student enters an email and a password of at least 8 characters — or presses *Continue with Google*.
+2. System creates the account in the Cognito user pool, creates the LearnSprint profile for that email (or finds the one that already exists), and returns a signed session token.
 3. Student is taken to the dashboard.
 
 **Alternative flows:**
 - *Email already registered* — System rejects the registration (409) and the Student can switch to signing in.
 - *Wrong password on sign-in* — System returns a generic "invalid email or password" (401), deliberately not revealing whether the email exists.
+- *Password rejected by the pool's policy* — System returns Cognito's reason (422) and the Student picks another.
+- *Forgot password* — Student enters the email on the *Reset your password* page; System always answers as if a code was sent (so the page never reveals whether an email is registered), Cognito emails a code, and the Student enters it with a new password. A wrong or expired code is rejected (400) and the old password stays.
+- *Change password (Profile)* — Student enters the current and a new password; System verifies the current one with Cognito before setting the new one. An account that only ever signed in with Google has no password to change and is told so.
+- *Delete account (Profile)* — Student types `DELETE` in the confirmation dialog. System removes the Student's LearnSprint data — courses they own (for every member), their own materials in courses they joined, the Google Calendar connection, their progress, constraints and profile — and then the Cognito user, and signs the Student out. Courses owned by someone else keep running without them.
 
-**Postcondition:** the Student holds a token; every later request carries it.
+**Postcondition:** the Student holds a token; every later request carries it. After deletion, nothing of the Student remains in DynamoDB, S3 or Cognito.
 
 ---
 
