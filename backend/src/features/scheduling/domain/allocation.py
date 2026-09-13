@@ -16,6 +16,7 @@ No I/O here on purpose - `now` is a parameter, not datetime.now(), so tests can 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
 
 from features.scheduling.domain.models import (
@@ -56,6 +57,25 @@ MIN_EMERGENCY_MINUTES_PER_TOPIC = 10
 # A window smaller than this isn't worth splitting a session into.
 MIN_USABLE_BLOCK_MINUTES = 15
 
+# Plans start on a clean clock boundary, not at the millisecond the request
+# arrived: sessions read "16:00", export cleanly, and two requests a second
+# apart produce the same plan.
+PLAN_SLOT_MINUTES = 5
+
+
+def round_up_to_slot(moment: datetime, slot_minutes: int = PLAN_SLOT_MINUTES) -> datetime:
+    """The next slot boundary at or after `moment`, with seconds and microseconds dropped."""
+    floored = moment.replace(second=0, microsecond=0)
+    remainder = floored.minute % slot_minutes
+    if remainder == 0 and floored == moment:
+        return floored
+    return floored + timedelta(minutes=slot_minutes - remainder)
+
+# Absolute (start, end) intervals that are already taken - typically the
+# sessions of a course with an earlier exam (ADR 0011). Removed from the free
+# windows exactly like blocked hours, so plans for different courses never overlap.
+Occupied = Sequence[tuple[datetime, datetime]]
+
 
 def generate_schedule(
     *,
@@ -65,6 +85,7 @@ def generate_schedule(
     blocked_slots: list[BlockedSlot],
     time_preference: TimePreference,
     exam_type: ExamType = ExamType.CLOSED,
+    occupied: Occupied = (),
 ) -> SchedulingResult:
     """Build a study plan for one course, or explain why none fits."""
     windows = find_available_windows(
@@ -72,6 +93,7 @@ def generate_schedule(
         exam_date=exam_date,
         blocked_slots=blocked_slots,
         time_preference=time_preference,
+        occupied=occupied,
     )
     available_minutes = sum(_window_minutes(window) for window in windows)
 
@@ -176,8 +198,9 @@ def find_available_windows(
     exam_date: datetime,
     blocked_slots: list[BlockedSlot],
     time_preference: TimePreference,
+    occupied: Occupied = (),
 ) -> list[tuple[datetime, datetime]]:
-    """Free study windows between now and the exam, with blocked slots removed."""
+    """Free study windows between now and the exam, with blocked slots and occupied time removed."""
     if exam_date <= now:
         return []
 
@@ -198,6 +221,7 @@ def find_available_windows(
             free_ranges = _subtract_blocked_slots(
                 day_window, slots_by_day.get(current_day.weekday(), []), current_day
             )
+            free_ranges = _subtract_intervals(free_ranges, occupied)
             windows.extend(
                 window
                 for window in free_ranges
@@ -443,11 +467,21 @@ def _subtract_blocked_slots(
     window: tuple[datetime, datetime], slots: list[BlockedSlot], day: date
 ) -> list[tuple[datetime, datetime]]:
     """Cut blocked commitments out of a day's window, returning what's left."""
-    free = [window]
-    for slot in sorted(slots, key=lambda item: item.start_time):
-        block_start = datetime.combine(day, slot.start_time, tzinfo=window[0].tzinfo)
-        block_end = datetime.combine(day, slot.end_time, tzinfo=window[0].tzinfo)
+    intervals = [
+        (
+            datetime.combine(day, slot.start_time, tzinfo=window[0].tzinfo),
+            datetime.combine(day, slot.end_time, tzinfo=window[0].tzinfo),
+        )
+        for slot in slots
+    ]
+    return _subtract_intervals([window], intervals)
 
+
+def _subtract_intervals(
+    free: list[tuple[datetime, datetime]], intervals: Occupied
+) -> list[tuple[datetime, datetime]]:
+    """Remove every interval from the free ranges, splitting a range when an interval sits inside it."""
+    for block_start, block_end in sorted(intervals):
         next_free: list[tuple[datetime, datetime]] = []
         for free_start, free_end in free:
             if block_end <= free_start or block_start >= free_end:

@@ -13,6 +13,7 @@ from features.scheduling.domain.allocation import (
     compute_review_weights,
     find_available_windows,
     generate_schedule,
+    round_up_to_slot,
     split_minutes_by_weight,
 )
 from features.scheduling.domain.models import (
@@ -89,6 +90,81 @@ class TestBlockIdentity:
         review_blocks = [b for b in schedule.blocks if b.block_type == BlockType.REVIEW]
         assert review_blocks
         assert all(b.action_id is None for b in review_blocks)
+
+
+class TestRoundUpToSlot:
+    """Plans start on a 5-minute boundary, never at the millisecond the request arrived."""
+
+    def test_rounds_up_to_the_next_boundary(self) -> None:
+        assert round_up_to_slot(datetime(2026, 9, 13, 15, 57, 40)) == datetime(2026, 9, 13, 16, 0, 0)
+
+    def test_keeps_a_moment_already_on_the_boundary(self) -> None:
+        assert round_up_to_slot(datetime(2026, 9, 13, 15, 55, 0)) == datetime(2026, 9, 13, 15, 55, 0)
+
+    def test_a_fraction_of_a_second_past_the_boundary_counts_as_past_it(self) -> None:
+        assert round_up_to_slot(datetime(2026, 9, 13, 15, 55, 0, 123)) == datetime(2026, 9, 13, 16, 0, 0)
+
+    def test_crosses_midnight_cleanly(self) -> None:
+        assert round_up_to_slot(datetime(2026, 9, 13, 23, 58, 1)) == datetime(2026, 9, 14, 0, 0, 0)
+
+    def test_drops_seconds_and_microseconds(self) -> None:
+        rounded = round_up_to_slot(datetime(2026, 9, 13, 15, 51, 9, 999999))
+
+        assert (rounded.second, rounded.microsecond) == (0, 0)
+        assert rounded == datetime(2026, 9, 13, 15, 55, 0)
+
+
+class TestOccupiedTime:
+    """Time already taken by another course's sessions is unavailable (ADR 0011)."""
+
+    def plan(self, occupied=()) -> Schedule:
+        result = generate_schedule(
+            now=NOW,
+            exam_date=NOW.replace(day=NOW.day + 7),
+            topics=[make_topic("t1"), make_topic("t2")],
+            blocked_slots=[],
+            time_preference=TimePreference.EVENING,
+            occupied=occupied,
+        )
+        assert isinstance(result, Schedule)
+        return result
+
+    def test_no_session_overlaps_occupied_time(self) -> None:
+        taken = [
+            (datetime(2026, 9, 7, 15, 0), datetime(2026, 9, 7, 17, 0)),
+            (datetime(2026, 9, 8, 18, 30), datetime(2026, 9, 8, 19, 0)),
+        ]
+
+        schedule = self.plan(occupied=taken)
+
+        for block in schedule.blocks:
+            for start, end in taken:
+                assert block.end <= start or block.start >= end, (block, start, end)
+
+    def test_occupied_time_reduces_what_is_available(self) -> None:
+        free = self.plan().total_available_minutes
+
+        squeezed = self.plan(occupied=[(datetime(2026, 9, 7, 15, 0), datetime(2026, 9, 7, 17, 0))])
+
+        assert squeezed.total_available_minutes == free - 120
+
+    def test_an_interval_inside_a_window_splits_it(self) -> None:
+        windows = find_available_windows(
+            now=NOW,
+            exam_date=NOW.replace(day=NOW.day + 1),
+            blocked_slots=[],
+            time_preference=TimePreference.EVENING,
+            occupied=[(datetime(2026, 9, 7, 18, 0), datetime(2026, 9, 7, 19, 0))],
+        )
+
+        monday = [window for window in windows if window[0].date() == NOW.date()]
+        assert monday == [
+            (datetime(2026, 9, 7, 15, 0), datetime(2026, 9, 7, 18, 0)),
+            (datetime(2026, 9, 7, 19, 0), datetime(2026, 9, 7, 23, 0)),
+        ]
+
+    def test_nothing_occupied_changes_nothing(self) -> None:
+        assert self.plan(occupied=()) == self.plan()
 
 
 class TestReviewWeights:
