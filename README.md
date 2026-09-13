@@ -85,7 +85,7 @@ The user pool needs Google as an identity provider and `http://localhost:5173/ca
 
 ## 5. Optional: enable AI analysis
 
-By default, uploaded material is analysed with a built-in keyword heuristic and topics get standard time estimates. Supply your own Anthropic API key under **Profile → AI analysis** and Claude reads the material instead, estimating how long each topic actually takes to learn.
+When the backend has `SYSTEM_ANTHROPIC_API_KEY` set (see `backend/.env.example`), Claude reads uploaded material: the batch upload gets real per-topic time estimates, "Analyse one file" gets a summary, key points and a recommendation of which topic the file belongs to, and "Analyse a syllabus" proposes one topic per lecture for review. Without the key, a built-in keyword heuristic does the same jobs more roughly. The matching itself is always LearnSprint's own explainable logic, never an AI decision (ADR 0013).
 
 The key is stored against your own account, never returned to the browser, and never logged. If the AI call fails for any reason the heuristic runs instead, so an upload never fails because of it.
 
