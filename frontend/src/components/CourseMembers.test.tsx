@@ -100,7 +100,7 @@ describe('CourseMembers', () => {
     let removed = false
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string, options: RequestInit = {}) => {
+      vi.fn(async (_url: string, options: RequestInit = {}) => {
         if (options.method === 'DELETE') {
           removed = true
           return { ok: true, status: 204, json: async () => undefined }
