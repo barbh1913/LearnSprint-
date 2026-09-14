@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link, Navigate, useLocation } from 'react-router-dom'
-import { Zap } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { cognitoConfigured, redirectToGoogleSignIn } from '../auth/cognito'
+import { Logo } from '../components/Logo'
 import { Button, ErrorNote, Field, Input } from '../components/ui/primitives'
 
 export function LoginPage() {
@@ -36,11 +36,9 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="mb-3 inline-flex size-11 items-center justify-center rounded-xl bg-primary/10">
-            <Zap className="size-5 text-primary" aria-hidden />
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">LearnSprint</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="sr-only">LearnSprint</h1>
+          <Logo className="mx-auto mb-4 h-10 w-auto" />
+          <p className="text-sm text-muted-foreground">
             Plan your exam prep around what you actually need to review.
           </p>
         </div>
