@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from main import app
 from shared import dynamo
-from tests.conftest import FakeBucket, FakeCognito, FakeTable
+from tests.conftest import FakeBucket, FakeCognito, FakeTable, upload_file
 
 client = TestClient(app)
 
@@ -160,9 +160,10 @@ class TestDeleteAccount:
             f"/courses/{course_id}/topics", json={"name": "Sorting"}, headers=owner
         ).json()
         client.post(f"/courses/{course_id}/members", json={"email": "member@example.com"}, headers=owner)
+        ref = upload_file(client, member, course_id, "notes.txt", b"quick sort")
         client.post(
             f"/courses/{course_id}/topics/{topic['id']}/materials",
-            files={"files": ("notes.txt", b"quick sort", "text/plain")},
+            json={"files": [ref]},
             headers=member,
         )
         client.patch(f"/topics/{topic['id']}/progress", json={"masteryLevel": 4}, headers=member)
@@ -189,9 +190,10 @@ class TestDeleteAccount:
         ).json()
         client.post(f"/courses/{course_id}/members", json={"email": "member@example.com"}, headers=owner)
         for who, name in ((owner, "owner.txt"), (member, "member.txt")):
+            ref = upload_file(client, who, course_id, name, b"notes")
             client.post(
                 f"/courses/{course_id}/topics/{topic['id']}/materials",
-                files={"files": (name, b"notes", "text/plain")},
+                json={"files": [ref]},
                 headers=who,
             )
 

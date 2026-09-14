@@ -26,9 +26,10 @@ from features.content_topics.domain.material_matching import (
 )
 from features.content_topics.infrastructure import ai_extractor
 from main import app
+from shared import storage
 from shared.config import settings
 
-from .conftest import FakeBucket
+from .conftest import FakeBucket, upload_file
 
 client = TestClient(app)
 
@@ -81,9 +82,19 @@ def make_pptx(*slide_titles: str) -> bytes:
 
 
 def analyze(headers: dict[str, str], course_id: str, name: str, *slides: str, kind: str = "materials"):
+    """Upload, then analyse - returning the upload response as-is if it was
+    refused (e.g. a non-member), so callers can assert on that status too.
+    """
+    upload = client.post(
+        f"/courses/{course_id}/materials/upload-url", json={"fileName": name}, headers=headers
+    )
+    if upload.status_code != 200:
+        return upload
+    key = upload.json()["key"]
+    storage.put_object(key, make_pptx(*slides))
     return client.post(
         f"/courses/{course_id}/{kind}/analyze",
-        files={"file": (name, make_pptx(*slides), "application/vnd.openxmlformats")},
+        json={"file": {"key": key, "fileName": name}},
         headers=headers,
     )
 
@@ -384,14 +395,17 @@ class TestMaterialAnalysis:
         headers = auth_headers()
         course = create_course(headers)
 
+        unsupported_ref = upload_file(client, headers, course["id"], "notes.txt", b"plain text")
+        corrupt_ref = upload_file(client, headers, course["id"], "broken.pdf", b"%PDF-1.4 not really")
+
         unsupported = client.post(
             f"/courses/{course['id']}/materials/analyze",
-            files={"file": ("notes.txt", b"plain text", "text/plain")},
+            json={"file": unsupported_ref},
             headers=headers,
         )
         corrupt = client.post(
             f"/courses/{course['id']}/materials/analyze",
-            files={"file": ("broken.pdf", b"%PDF-1.4 not really", "application/pdf")},
+            json={"file": corrupt_ref},
             headers=headers,
         )
 

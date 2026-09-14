@@ -13,7 +13,7 @@ from features.content_topics.domain.estimates import split_total_minutes
 from main import app
 from shared import dynamo
 
-from .conftest import FakeBucket, FakeTable
+from .conftest import FakeBucket, FakeTable, upload_file
 
 client = TestClient(app)
 
@@ -316,9 +316,13 @@ class TestSubtasks:
 
 
 def upload(headers: dict[str, str], course_id: str, topic_id: str, *names: str):
+    refs = [
+        upload_file(client, headers, course_id, name, b"%PDF-1.4 fake " + name.encode())
+        for name in names
+    ]
     return client.post(
         f"/courses/{course_id}/topics/{topic_id}/materials",
-        files=[("files", (name, b"%PDF-1.4 fake " + name.encode(), "application/pdf")) for name in names],
+        json={"files": refs},
         headers=headers,
     )
 
@@ -405,10 +409,11 @@ class TestMaterials:
         headers = auth_headers()
         course = create_course(headers)
         topic = create_topic(headers, course["id"])
+        ref = upload_file(client, headers, course["id"], "empty.pdf", b"")
 
         response = client.post(
             f"/courses/{course['id']}/topics/{topic['id']}/materials",
-            files=[("files", ("empty.pdf", b"", "application/pdf"))],
+            json={"files": [ref]},
             headers=headers,
         )
 

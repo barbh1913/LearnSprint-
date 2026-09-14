@@ -62,6 +62,16 @@ function mockApi({
       if (url.includes('/members')) {
         return { ok: true, status: 200, json: async () => [] }
       }
+      if (url.includes('/materials/upload-url')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ uploadUrl: 'https://fake-bucket.test/key', key: 'fake-key', expiresInSeconds: 300 }),
+        }
+      }
+      if (url.includes('fake-bucket.test')) {
+        return { ok: true, status: 200, json: async () => ({}) }
+      }
       if (url.includes('/materials/analyze')) {
         posts.push(url)
         return { ok: true, status: 201, json: async () => materialAnalysis }

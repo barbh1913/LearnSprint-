@@ -57,3 +57,14 @@ def presigned_get_url(key: str, *, file_name: str, expires_in: int) -> str:
         },
         ExpiresIn=expires_in,
     )
+
+
+def presigned_put_url(key: str, *, expires_in: int) -> str:
+    """A time-limited link the browser can PUT a file straight to, bypassing API
+    Gateway/Lambda's much smaller payload limits (10MB / 6MB respectively) -
+    see docs/deployment-setup.md. The bucket's CORS rule (PUT, Content-Type)
+    is what makes a cross-origin browser PUT to this URL actually work.
+    """
+    return get_client().generate_presigned_url(
+        "put_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=expires_in,
+    )
