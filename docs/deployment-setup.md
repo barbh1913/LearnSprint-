@@ -29,6 +29,7 @@ The AWS side (role, permissions) is done. `deploy-frontend.yml` triggers on ever
 | `VITE_COGNITO_DOMAIN` | `il-central-1tahdnpizi.auth.il-central-1.amazoncognito.com` |
 | `VITE_COGNITO_CLIENT_ID` | `4gbs8nrr3jqn54iqjd6r3an6hd` |
 | `VITE_REDIRECT_URI` | `https://d6dbklbpa5amn.cloudfront.net/callback` |
+| `SYSTEM_ANTHROPIC_API_KEY` | your own Anthropic key (starts `sk-ant-...`) — optional, see [AI content analysis](#ai-content-analysis-fr27-fr28-fr210--one-variable-four-routes) below |
 
 The `VITE_COGNITO_*` and `VITE_REDIRECT_URI` values are public identifiers, not secrets — they end up in the browser bundle regardless. They live in Secrets only so every environment-specific value is set in one place. `frontend/.env.production` already carries the same values for a local production build.
 
@@ -113,11 +114,13 @@ Nothing changes on the frontend side — the backend builds the Google authorize
 
 AI is a backend capability ([ADR 0013](adr/0013-content-intelligence-pipeline.md)); there is nothing per student to configure any more, and the old `GET/PUT /ai-settings` routes can be deleted from API Gateway.
 
-**1. The key** — on `learnsprint-content-topics` only (the only function that calls Anthropic):
+**1. The key** — set the `SYSTEM_ANTHROPIC_API_KEY` GitHub secret (see the table above) and `deploy-backend.yml`'s last step syncs it onto `learnsprint-content-topics` (the only function that calls Anthropic) on every backend deploy - no manual AWS CLI step needed. That step reads the function's current environment and merges the key in with `jq`, so it never clobbers `DYNAMO_TABLE`/`UPLOADS_BUCKET`. Put the same value in `backend/.env` for local development. **Set a spending limit on the key in the Anthropic console**: it now serves every student's upload. Leaving the secret unset is safe - the sync step is skipped and every upload uses the keyword heuristic.
+
+To set or change it by hand instead of through CI:
 ```
 aws lambda update-function-configuration --function-name learnsprint-content-topics --environment "Variables={SYSTEM_ANTHROPIC_API_KEY=sk-ant-...}"
 ```
-As with the Google variables, `--environment` replaces the whole map - include whatever the function already has. Put the same value in `backend/.env` for local development. **Set a spending limit on the key in the Anthropic console**: it now serves every student's upload. Leaving it empty is safe - every upload then uses the keyword heuristic.
+As with the Google variables, `--environment` replaces the whole map - include whatever the function already has.
 
 **2. Routes** — four new exact routes on the `learnsprint-content-topics` integration:
 ```
