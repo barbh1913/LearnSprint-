@@ -6,9 +6,9 @@ import { Badge, Button, Card, ErrorNote } from '../ui/primitives'
 import { rememberState } from './googleCalendarState'
 
 /**
- * Connect / disconnect the student's Google account (FR6.2). Renders nothing
- * when the server has no Google client configured, so a deployment without
- * the feature just doesn't show it.
+ * Connect / disconnect the student's Google account (FR6.2). When the server
+ * has no Google client configured the card still appears, greyed out and
+ * saying so - a hidden feature looks like a missing one.
  */
 export function GoogleCalendarControls({
   courseId,
@@ -91,7 +91,32 @@ export function GoogleCalendarControls({
     }
   }
 
-  if (!status?.configured) return null
+  if (!status) return null
+
+  if (!status.configured) {
+    return (
+      <Card className="mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <CalendarX className="size-5 text-muted-foreground" aria-hidden />
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Google Calendar</span>
+                <Badge tone="neutral">Not available</Badge>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Google Calendar sync is not set up on this server yet. Download the .ics file
+                instead, or ask whoever runs the server to add the Google client.
+              </p>
+            </div>
+          </div>
+          <Button size="sm" variant="primary" disabled title="Not set up on this server">
+            Connect Google Calendar
+          </Button>
+        </div>
+      </Card>
+    )
+  }
 
   const Icon = status.connected ? CalendarCheck : CalendarX
 

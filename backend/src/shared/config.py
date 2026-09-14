@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # A separate Google OAuth client for Calendar sync (FR6.2, ADR 0010) - the
     # Cognito sign-in above never hands the app a Google token. Empty means the
-    # feature is off and the Calendar page hides the Google controls.
+    # feature is off and the Calendar page shows the Google card as "Not available".
     google_calendar_client_id: str = ""
     google_calendar_client_secret: str = ""
     google_calendar_redirect_uri: str = ""
