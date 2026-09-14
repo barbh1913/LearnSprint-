@@ -105,3 +105,29 @@ jobs:
             --function-name learnsprint-content-topics \
             --environment file://updated-env.json
           aws lambda wait function-updated --function-name learnsprint-content-topics
+
+      # Google Calendar sync (FR6.2, ADR 0010) lives in the scheduling feature,
+      # so only learnsprint-scheduling needs the OAuth client. Same merge-with-jq
+      # pattern as above. The redirect URI is public and fixed per deployment,
+      # so it is spelled out here rather than kept as a secret. Without the
+      # client id secret the step is skipped and the Calendar page simply hides
+      # the Google controls.
+      - name: Sync the Google Calendar client onto learnsprint-scheduling
+        if: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID != '' }}
+        env:
+          GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
+          GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
+          GOOGLE_CALENDAR_REDIRECT_URI: https://d6dbklbpa5amn.cloudfront.net/calendar/google/callback
+        run: |
+          aws lambda get-function-configuration \
+            --function-name learnsprint-scheduling \
+            --query "Environment.Variables" --output json > current-env.json
+          jq --arg id "$GOOGLE_CALENDAR_CLIENT_ID" \
+             --arg secret "$GOOGLE_CALENDAR_CLIENT_SECRET" \
+             --arg uri "$GOOGLE_CALENDAR_REDIRECT_URI" \
+            '{Variables: (. + {GOOGLE_CALENDAR_CLIENT_ID: $id, GOOGLE_CALENDAR_CLIENT_SECRET: $secret, GOOGLE_CALENDAR_REDIRECT_URI: $uri})}' \
+            current-env.json > updated-env.json
+          aws lambda update-function-configuration \
+            --function-name learnsprint-scheduling \
+            --environment file://updated-env.json
+          aws lambda wait function-updated --function-name learnsprint-scheduling

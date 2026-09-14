@@ -30,6 +30,8 @@ The AWS side (role, permissions) is done. `deploy-frontend.yml` triggers on ever
 | `VITE_COGNITO_CLIENT_ID` | `4gbs8nrr3jqn54iqjd6r3an6hd` |
 | `VITE_REDIRECT_URI` | `https://d6dbklbpa5amn.cloudfront.net/callback` |
 | `SYSTEM_ANTHROPIC_API_KEY` | your own Anthropic key (starts `sk-ant-...`) — optional, see [AI content analysis](#ai-content-analysis-fr27-fr28-fr210--one-variable-four-routes) below |
+| `GOOGLE_CALENDAR_CLIENT_ID` | the Google OAuth client id (ends `.apps.googleusercontent.com`) — optional, see [Google Calendar sync](#google-calendar-sync-fr62--one-time-manual-setup) below |
+| `GOOGLE_CALENDAR_CLIENT_SECRET` | its client secret (starts `GOCSPX-`) — optional, same section |
 
 The `VITE_COGNITO_*` and `VITE_REDIRECT_URI` values are public identifiers, not secrets — they end up in the browser bundle regardless. They live in Secrets only so every environment-specific value is set in one place. `frontend/.env.production` already carries the same values for a local production build.
 
@@ -41,7 +43,10 @@ The `VITE_COGNITO_*` and `VITE_REDIRECT_URI` values are public identifiers, not 
 ```
 It was created fresh rather than reusing the account's other GitHub Actions role (`githubactions-s3-fullaccess`), which is scoped to two unrelated repositories from other coursework — widening someone else's shared role to a third project isn't something to do without asking. Its permissions are two separate inline policies, each as narrow as the job it's for:
 - `deploy-frontend`: `s3:PutObject` / `DeleteObject` / `ListBucket` on `learnsprint-frontend-835505308330` alone, and `cloudfront:CreateInvalidation` on `E2GSBED87C32YJ` alone.
-- `deploy-backend-lambdas`: `lambda:UpdateFunctionCode` / `GetFunction` / `GetFunctionConfiguration`, scoped to exactly the six function ARNs above and nothing else in the account.
+- `deploy-backend-lambdas`: `lambda:UpdateFunctionCode` / `GetFunction` / `GetFunctionConfiguration` / `UpdateFunctionConfiguration`, scoped to exactly the six function ARNs above and nothing else in the account. `UpdateFunctionConfiguration` is what the two environment-sync steps (Anthropic key, Google Calendar client) need; as of 2026-09-14 the policy in the account still lacks it, so those steps fail with `AccessDenied` until it is added:
+  ```
+  aws iam put-role-policy --role-name learnsprint-github-actions --policy-name deploy-backend-lambdas --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["lambda:UpdateFunctionCode","lambda:GetFunction","lambda:GetFunctionConfiguration","lambda:UpdateFunctionConfiguration"],"Resource":["arn:aws:lambda:il-central-1:835505308330:function:learnsprint-auth","arn:aws:lambda:il-central-1:835505308330:function:learnsprint-academic-profile","arn:aws:lambda:il-central-1:835505308330:function:learnsprint-content-topics","arn:aws:lambda:il-central-1:835505308330:function:learnsprint-scheduling","arn:aws:lambda:il-central-1:835505308330:function:learnsprint-progress","arn:aws:lambda:il-central-1:835505308330:function:learnsprint-study-groups"]}]}'
+  ```
 
 ## Redeploying by hand
 
@@ -83,7 +88,7 @@ Only `index.html` needs invalidating — every other asset is content-hashed, so
 
 ## Google Calendar sync (FR6.2) — one-time manual setup
 
-`deploy-backend.yml` ships the code, but it only runs `update-function-code`: environment variables and API Gateway routes are not part of the package and have to be set once by hand. See [ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md) for why this is a separate Google OAuth client rather than the Cognito sign-in.
+The code is already deployed with every backend push; what is missing until this is done is the Google OAuth client, which only you can create. Until then the Calendar page hides the Google controls (`GET /integrations/google-calendar/status` answers `configured: false`). See [ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md) for why this is a separate Google OAuth client rather than the Cognito sign-in.
 
 **1. Google Cloud console** (any project — a new one is fine):
 - APIs & Services → Library → enable **Google Calendar API**.
@@ -91,11 +96,7 @@ Only `index.html` needs invalidating — every other asset is content-hashed, so
 - Credentials → Create credentials → **OAuth client ID → Web application**. Authorized redirect URIs: `http://localhost:5173/calendar/google/callback` and `https://d6dbklbpa5amn.cloudfront.net/calendar/google/callback`. Keep the client id and secret.
 - Known limitation of **Testing** status: Google expires refresh tokens after **7 days**, so a connected student has to reconnect weekly. Publishing to Production removes that but sends the app through Google's verification review — not worth it for a class project.
 
-**2. Lambda environment** — `learnsprint-scheduling` only (the sync code lives in the `scheduling` feature, no new function):
-```
-aws lambda update-function-configuration --function-name learnsprint-scheduling --environment "Variables={GOOGLE_CALENDAR_CLIENT_ID=...,GOOGLE_CALENDAR_CLIENT_SECRET=...,GOOGLE_CALENDAR_REDIRECT_URI=https://d6dbklbpa5amn.cloudfront.net/calendar/google/callback}"
-```
-`--environment` replaces the whole variable map, so include any variables the function already has (`aws lambda get-function-configuration --function-name learnsprint-scheduling --query Environment`). The same three values go in `backend/.env` for local development.
+**2. GitHub secrets** — add `GOOGLE_CALENDAR_CLIENT_ID` and `GOOGLE_CALENDAR_CLIENT_SECRET` (table above). `deploy-backend.yml` merges them, together with the fixed production redirect URI, into `learnsprint-scheduling`'s environment on every backend deploy — the same way it syncs the Anthropic key. To apply them without a code change, run the workflow by hand: **Actions → Deploy backend to Lambda → Run workflow**. Nothing is set on the Lambda directly. For local development the same values, with the `localhost` redirect URI, go in `backend/.env`.
 
 **3. API Gateway routes** — seven new exact routes, all pointing at the `learnsprint-scheduling` integration (copy its id from the existing `GET /courses/{course_id}/schedule` route). The first two are the all-courses Calendar (FR3.1/FR6.1) and are needed even without Google; the rest are the sync:
 ```
