@@ -49,6 +49,13 @@ function mockApi(materials: unknown[] = []) {
       if (path.endsWith('/materials') && method === 'GET') {
         return { ok: true, status: 200, json: async () => materials }
       }
+      if (path.endsWith('/materials/upload-url') && method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ uploadUrl: 'https://fake-bucket.test/key', key: 'fake-key', expiresInSeconds: 300 }),
+        }
+      }
       if (method === 'DELETE') return { ok: true, status: 204, json: async () => undefined }
       return { ok: true, status: 200, json: async () => ({}) }
     }),
@@ -189,7 +196,7 @@ describe('TopicDetailDialog', () => {
     )
   })
 
-  it('uploads attachments as form data to the topic', async () => {
+  it('uploads attachments straight to S3, then attaches the ref to the topic', async () => {
     const calls = mockApi()
     renderDialog()
     await screen.findByText(/No files yet/)
@@ -198,7 +205,10 @@ describe('TopicDetailDialog', () => {
     fireEvent.change(screen.getByLabelText('Attach files'), { target: { files: [file] } })
 
     await waitFor(() =>
-      expect(lastCall(calls, 'POST')).toMatchObject({ path: '/courses/c1/topics/t1/materials', body: 'form-data' }),
+      expect(lastCall(calls, 'POST')).toMatchObject({
+        path: '/courses/c1/topics/t1/materials',
+        body: { files: [{ key: 'fake-key', fileName: 'notes.pdf' }] },
+      }),
     )
   })
 })

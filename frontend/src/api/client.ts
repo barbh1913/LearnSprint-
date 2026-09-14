@@ -26,6 +26,13 @@ import type {
   Velocity,
 } from '../types'
 
+/** A file already PUT straight to S3 (see `uploadToS3` below) - what the
+ * analyse/extract/materials endpoints expect instead of the file bytes. */
+export interface UploadedFileRef {
+  key: string
+  fileName: string
+}
+
 /** Result of analysing a batch of uploaded course files. */
 export interface ExtractionResult {
   created: Topic[]
@@ -98,12 +105,11 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
-  const isFormData = options.body instanceof FormData
 
   const response = await fetch(apiUrl(path), {
     ...options,
     headers: {
-      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -116,10 +122,27 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.status === 204 ? (undefined as T) : response.json()
 }
 
-function singleFile(file: File): FormData {
-  const body = new FormData()
-  body.append('file', file)
-  return body
+/** Uploads straight to S3 via a short-lived presigned URL, bypassing the API
+ * Gateway/Lambda payload limits (well below the app's own 20MB/file allowance) -
+ * see docs/deployment-setup.md. Returns the {key, fileName} ref the
+ * analyse/extract/materials endpoints take instead of the file bytes.
+ */
+async function uploadToS3(courseId: string, file: File): Promise<UploadedFileRef> {
+  const { uploadUrl, key } = await request<{ uploadUrl: string; key: string; expiresInSeconds: number }>(
+    `/courses/${courseId}/materials/upload-url`,
+    { method: 'POST', body: JSON.stringify({ fileName: file.name }) },
+  )
+
+  const response = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+  })
+  if (!response.ok) {
+    throw new ApiError(`Could not upload ${file.name}`, response.status)
+  }
+
+  return { key, fileName: file.name }
 }
 
 async function downloadIcs(path: string, filename: string): Promise<void> {
@@ -268,11 +291,13 @@ export const api = {
 
   // Content analysis (FR2.8, FR2.10): store and understand one file, then the
   // student confirms where it goes. Nothing changes until the confirm call.
-  analyzeMaterial: (courseId: string, file: File) =>
-    request<MaterialAnalysis>(`/courses/${courseId}/materials/analyze`, {
+  analyzeMaterial: async (courseId: string, file: File) => {
+    const ref = await uploadToS3(courseId, file)
+    return request<MaterialAnalysis>(`/courses/${courseId}/materials/analyze`, {
       method: 'POST',
-      body: singleFile(file),
-    }),
+      body: JSON.stringify({ file: ref }),
+    })
+  },
 
   confirmMaterial: (
     courseId: string,
@@ -284,11 +309,13 @@ export const api = {
       body: JSON.stringify(decision),
     }),
 
-  analyzeSyllabus: (courseId: string, file: File) =>
-    request<SyllabusAnalysis>(`/courses/${courseId}/syllabus/analyze`, {
+  analyzeSyllabus: async (courseId: string, file: File) => {
+    const ref = await uploadToS3(courseId, file)
+    return request<SyllabusAnalysis>(`/courses/${courseId}/syllabus/analyze`, {
       method: 'POST',
-      body: singleFile(file),
-    }),
+      body: JSON.stringify({ file: ref }),
+    })
+  },
 
   confirmSyllabus: (courseId: string, materialId: string, items: SyllabusItemDecision[]) =>
     request<SyllabusConfirmation>(`/courses/${courseId}/syllabus/confirm`, {
@@ -300,14 +327,11 @@ export const api = {
   listMaterials: (courseId: string, topicId: string) =>
     request<Material[]>(`/courses/${courseId}/topics/${topicId}/materials`),
 
-  uploadMaterials: (courseId: string, topicId: string, files: File[]) => {
-    const body = new FormData()
-    for (const file of files) {
-      body.append('files', file)
-    }
+  uploadMaterials: async (courseId: string, topicId: string, files: File[]) => {
+    const refs = await Promise.all(files.map((file) => uploadToS3(courseId, file)))
     return request<Material[]>(`/courses/${courseId}/topics/${topicId}/materials`, {
       method: 'POST',
-      body,
+      body: JSON.stringify({ files: refs }),
     })
   },
 
@@ -322,14 +346,11 @@ export const api = {
     }),
 
   /** Upload up to 15 files at once; they're analysed together as one corpus. */
-  extractTopics: (courseId: string, files: File[]) => {
-    const body = new FormData()
-    for (const file of files) {
-      body.append('files', file)
-    }
+  extractTopics: async (courseId: string, files: File[]) => {
+    const refs = await Promise.all(files.map((file) => uploadToS3(courseId, file)))
     return request<ExtractionResult>(`/courses/${courseId}/topics/extract`, {
       method: 'POST',
-      body,
+      body: JSON.stringify({ files: refs }),
     })
   },
 
