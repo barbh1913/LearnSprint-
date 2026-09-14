@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from main import app
 from shared.config import settings
 
+from .conftest import upload_file
+
 client = TestClient(app)
 
 
@@ -680,17 +682,23 @@ def _make_pptx(*slide_titles: str) -> bytes:
     return buffer.getvalue()
 
 
+def _extract(headers: dict[str, str], course_id: str, files: list[tuple[str, bytes]]):
+    """Upload each (name, content) pair straight to the fake bucket, then extract."""
+    refs = [upload_file(client, headers, course_id, name, content) for name, content in files]
+    return client.post(
+        f"/courses/{course_id}/topics/extract",
+        json={"files": refs},
+        headers=headers,
+    )
+
+
 class TestUpload:
     @pytest.mark.parametrize("filename", ["notes.txt", "notes.docx"])
     def test_unsupported_file_types_are_rejected(self, filename: str) -> None:
         headers = auth_headers()
         course = create_course(headers)
 
-        response = client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", (filename, b"some text", "text/plain"))],
-            headers=headers,
-        )
+        response = _extract(headers, course["id"], [(filename, b"some text")])
 
         assert response.status_code == 400
 
@@ -699,11 +707,7 @@ class TestUpload:
         course = create_course(headers)
         content = _make_pptx("Binary Search Trees", "Hash Tables")
 
-        response = client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("lecture1.pptx", content, "application/vnd.openxmlformats"))],
-            headers=headers,
-        )
+        response = _extract(headers, course["id"], [("lecture1.pptx", content)])
 
         assert response.status_code == 201
         body = response.json()
@@ -724,11 +728,7 @@ class TestUpload:
         course = create_course(headers)
         user_id = client.get("/auth/me", headers=headers).json()["id"]
 
-        client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("lecture1.pptx", _make_pptx("Recursion"), "application/x"))],
-            headers=headers,
-        )
+        _extract(headers, course["id"], [("lecture1.pptx", _make_pptx("Recursion"))])
 
         stored_keys = list(fake_storage.objects)
         assert len(stored_keys) == 1
@@ -745,16 +745,8 @@ class TestUpload:
             f"/courses/{course['id']}/members", json={"email": "bob@example.com"}, headers=alice
         )
 
-        client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("a.pptx", _make_pptx("Alice's slide"), "application/x"))],
-            headers=alice,
-        )
-        client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("b.pptx", _make_pptx("Bob's slide"), "application/x"))],
-            headers=bob,
-        )
+        _extract(alice, course["id"], [("a.pptx", _make_pptx("Alice's slide"))])
+        _extract(bob, course["id"], [("b.pptx", _make_pptx("Bob's slide"))])
 
         alice_id = client.get("/auth/me", headers=alice).json()["id"]
         bob_id = client.get("/auth/me", headers=bob).json()["id"]
@@ -762,15 +754,19 @@ class TestUpload:
         assert prefixes == {alice_id, bob_id}
 
     def test_too_many_files_are_rejected(self) -> None:
+        # The count is checked before any file is even fetched, so fabricated
+        # refs (never actually PUT to S3) are enough to exercise this branch.
         headers = auth_headers()
         course = create_course(headers)
 
         response = client.post(
             f"/courses/{course['id']}/topics/extract",
-            files=[
-                ("files", (f"deck{index}.pdf", b"%PDF-1.4", "application/pdf"))
-                for index in range(16)
-            ],
+            json={
+                "files": [
+                    {"key": f"fake/{index}", "fileName": f"deck{index}.pdf"}
+                    for index in range(16)
+                ]
+            },
             headers=headers,
         )
 
@@ -780,11 +776,7 @@ class TestUpload:
         headers = auth_headers()
         course = create_course(headers)
 
-        response = client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("empty.pptx", _make_pptx(), "application/x"))],
-            headers=headers,
-        )
+        response = _extract(headers, course["id"], [("empty.pptx", _make_pptx())])
 
         assert response.status_code == 422
         assert "no readable text" in response.json()["detail"].lower()
@@ -793,11 +785,7 @@ class TestUpload:
         headers = auth_headers()
         course = create_course(headers)
 
-        response = client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("noise.pptx", _make_pptx("1", "2", "3"), "application/x"))],
-            headers=headers,
-        )
+        response = _extract(headers, course["id"], [("noise.pptx", _make_pptx("1", "2", "3"))])
 
         assert response.status_code == 422
         assert "no topics could be found" in response.json()["detail"].lower()
@@ -819,11 +807,7 @@ class TestUpload:
             "features.content_topics.infrastructure.ai_extractor.analyse_syllabus", fake_analyse
         )
 
-        response = client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("lecture1.pptx", _make_pptx("whatever"), "application/x"))],
-            headers=headers,
-        )
+        response = _extract(headers, course["id"], [("lecture1.pptx", _make_pptx("whatever"))])
 
         body = response.json()
         assert body["analysedBy"] == "ai"
@@ -845,11 +829,7 @@ class TestUpload:
             "features.content_topics.infrastructure.ai_extractor.analyse_syllabus", must_not_run
         )
 
-        response = client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[("files", ("lecture1.pptx", _make_pptx("Binary Search Trees"), "application/x"))],
-            headers=headers,
-        )
+        response = _extract(headers, course["id"], [("lecture1.pptx", _make_pptx("Binary Search Trees"))])
 
         assert response.status_code == 201
         assert response.json()["analysedBy"] == "heuristic"
@@ -868,13 +848,7 @@ class TestUpload:
             "features.content_topics.infrastructure.ai_extractor.analyse_syllabus", boom
         )
 
-        response = client.post(
-            f"/courses/{course['id']}/topics/extract",
-            files=[
-                ("files", ("lecture1.pptx", _make_pptx("Binary Search Trees"), "application/x"))
-            ],
-            headers=headers,
-        )
+        response = _extract(headers, course["id"], [("lecture1.pptx", _make_pptx("Binary Search Trees"))])
 
         body = response.json()
         assert body["analysedBy"] == "heuristic"

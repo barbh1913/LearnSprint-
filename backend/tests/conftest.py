@@ -77,6 +77,9 @@ class FakeBucket:
     def presigned_get_url(self, key: str, *, file_name: str, expires_in: int) -> str:
         return f"https://fake-bucket.test/{key}?filename={file_name}&expires={expires_in}"
 
+    def presigned_put_url(self, key: str, *, expires_in: int) -> str:
+        return f"https://fake-bucket.test/{key}?upload=1&expires={expires_in}"
+
 
 class FakeCognito:
     """Dict-backed stand-in for the user pool: email -> password (None for a Google-only user)."""
@@ -154,6 +157,23 @@ def fake_cognito(monkeypatch: pytest.MonkeyPatch) -> FakeCognito:
     return pool
 
 
+def upload_file(client: Any, headers: dict[str, str], course_id: str, file_name: str, content: bytes) -> dict[str, str]:
+    """Simulate the browser's direct-to-S3 upload flow used by every upload
+    endpoint now: ask for a presigned URL, then write the bytes straight to
+    the (fake) bucket the way the browser's own PUT would, and hand back the
+    {key, fileName} ref the analyse/extract/materials endpoints expect.
+    """
+    upload = client.post(
+        f"/courses/{course_id}/materials/upload-url",
+        json={"fileName": file_name},
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    key = upload.json()["key"]
+    storage.put_object(key, content)
+    return {"key": key, "fileName": file_name}
+
+
 @pytest.fixture(autouse=True)
 def fake_storage(monkeypatch: pytest.MonkeyPatch) -> FakeBucket:
     """Point shared.storage at the fake bucket for the duration of each test."""
@@ -163,5 +183,6 @@ def fake_storage(monkeypatch: pytest.MonkeyPatch) -> FakeBucket:
     monkeypatch.setattr(storage, "get_object", bucket.get)
     monkeypatch.setattr(storage, "delete_object", bucket.delete)
     monkeypatch.setattr(storage, "presigned_get_url", bucket.presigned_get_url)
+    monkeypatch.setattr(storage, "presigned_put_url", bucket.presigned_put_url)
 
     return bucket

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from features.academic_profile.infrastructure import repository as course_repo
@@ -24,6 +24,7 @@ router = APIRouter(tags=["content-topics"])
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_FILES_PER_UPLOAD = 15
 DOWNLOAD_LINK_SECONDS = 5 * 60
+UPLOAD_LINK_SECONDS = 5 * 60
 
 Priority = Literal["low", "medium", "high"]
 
@@ -95,6 +96,23 @@ class MaterialOut(BaseModel):
 class DownloadLinkOut(BaseModel):
     url: str
     expiresInSeconds: int
+
+
+class UploadUrlRequest(BaseModel):
+    fileName: str = Field(min_length=1, max_length=255)
+
+
+class UploadUrlOut(BaseModel):
+    uploadUrl: str
+    key: str
+    expiresInSeconds: int
+
+
+class UploadedFileRef(BaseModel):
+    """What the browser gives back after PUTting a file straight to S3 (see upload-url below)."""
+
+    key: str
+    fileName: str
 
 
 # --- Analysis flows (FR2.8, FR2.10) ---
@@ -203,14 +221,57 @@ class ExtractionResult(BaseModel):
     note: str | None = None
 
 
+@router.post("/courses/{course_id}/materials/upload-url", response_model=UploadUrlOut)
+def get_upload_url(
+    course_id: str,
+    payload: UploadUrlRequest,
+    user_id: str = Depends(get_current_user_id),
+) -> UploadUrlOut:
+    """A short-lived link the browser can PUT a file straight to, under this
+    student's own S3 prefix - bypassing API Gateway/Lambda's much smaller
+    payload limits (see docs/deployment-setup.md).
+    """
+    _require_membership(user_id, course_id)
+    key = storage.upload_key(user_id, course_id, payload.fileName)
+    return UploadUrlOut(
+        uploadUrl=storage.presigned_put_url(key, expires_in=UPLOAD_LINK_SECONDS),
+        key=key,
+        expiresInSeconds=UPLOAD_LINK_SECONDS,
+    )
+
+
+def _fetch_uploaded(ref: UploadedFileRef, *, user_id: str, course_id: str) -> bytes:
+    """Fetch a file the browser already PUT to S3 via the upload-url above.
+
+    The key must live under this student's own prefix - the one thing standing
+    between one student's ref and another's, since a presigned PUT URL isn't
+    tied to a course/topic the way the old multipart upload was.
+    """
+    if not ref.key.startswith(f"{user_id}/{course_id}/"):
+        raise HTTPException(status_code=403, detail="That file does not belong to you")
+
+    try:
+        content = storage.get_object(ref.key)
+    except Exception as exc:  # noqa: BLE001 - the key never reached S3, or already expired
+        raise HTTPException(status_code=400, detail=f"Could not read {ref.fileName}") from exc
+
+    if len(content) > MAX_UPLOAD_BYTES:
+        storage.delete_object(ref.key)
+        raise HTTPException(status_code=413, detail=f"{ref.fileName} is larger than 20 MB")
+    if not content:
+        raise HTTPException(status_code=400, detail=f"{ref.fileName} is empty")
+
+    return content
+
+
 @router.post(
     "/courses/{course_id}/topics/extract",
     response_model=ExtractionResult,
     status_code=status.HTTP_201_CREATED,
 )
-async def extract_from_files(
+def extract_from_files(
     course_id: str,
-    files: list[UploadFile] = File(...),
+    files: list[UploadedFileRef] = Body(embed=True),
     user_id: str = Depends(get_current_user_id),
 ) -> ExtractionResult:
     """Analyse a batch of course files into topics with study-time estimates.
@@ -232,7 +293,7 @@ async def extract_from_files(
             detail=f"Upload at most {MAX_FILES_PER_UPLOAD} files at a time",
         )
 
-    lines, filenames = await _read_all(files, user_id=user_id, course_id=course_id)
+    lines, filenames = _read_all(files, user_id=user_id, course_id=course_id)
     if not lines:
         raise HTTPException(status_code=422, detail="Those files had no readable text")
 
@@ -261,42 +322,33 @@ async def extract_from_files(
     )
 
 
-async def _read_all(
-    files: list[UploadFile], *, user_id: str, course_id: str
+def _read_all(
+    files: list[UploadedFileRef], *, user_id: str, course_id: str
 ) -> tuple[list[str], list[str]]:
-    """Save every uploaded file under the student's own S3 prefix, then read
-    the text back out of the stored copy - not the request body - so what
-    gets analysed is provably what's on record for this student (FR2.1).
+    """Read the text out of every file the student already PUT to S3 (via the
+    upload-url endpoint above) - not the request body - so what gets analysed
+    is provably what's on record for this student (FR2.1).
 
     Concatenated in upload order.
     """
     lines: list[str] = []
     filenames: list[str] = []
 
-    for upload in files:
-        content = await upload.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=413, detail=f"{upload.filename} is larger than 20 MB"
-            )
-
-        filename = upload.filename or ""
-        key = storage.upload_key(user_id, course_id, filename)
-        storage.put_object(key, content)
-        stored = storage.get_object(key)
+    for ref in files:
+        stored = _fetch_uploaded(ref, user_id=user_id, course_id=course_id)
 
         try:
-            lines.extend(file_parser.read_lines(filename, stored))
+            lines.extend(file_parser.read_lines(ref.fileName, stored))
         except file_parser.UnsupportedFileType as exc:
             raise HTTPException(
                 status_code=400, detail="Only PDF and PPTX files are supported"
             ) from exc
         except Exception as exc:  # noqa: BLE001 - a corrupt upload shouldn't 500
             raise HTTPException(
-                status_code=400, detail=f"Could not read {upload.filename}"
+                status_code=400, detail=f"Could not read {ref.fileName}"
             ) from exc
 
-        filenames.append(filename)
+        filenames.append(ref.fileName)
 
     return lines, filenames
 
@@ -509,14 +561,14 @@ def delete_topic(
     response_model=MaterialAnalysisOut,
     status_code=status.HTTP_201_CREATED,
 )
-async def analyze_material(
+def analyze_material(
     course_id: str,
-    file: UploadFile = File(...),
+    file: UploadedFileRef = Body(embed=True),
     user_id: str = Depends(get_current_user_id),
 ) -> MaterialAnalysisOut:
     """One file: store it, understand it, and recommend where it belongs (FR2.8)."""
     _require_membership(user_id, course_id)
-    file_name, key, size, lines = await _store_and_read(file, user_id=user_id, course_id=course_id)
+    file_name, key, size, lines = _store_and_read(file, user_id=user_id, course_id=course_id)
 
     result = material_analysis.analyse_material(
         user_id=user_id, course_id=course_id, file_name=file_name, s3_key=key, size_bytes=size, lines=lines
@@ -562,14 +614,14 @@ def confirm_material(
     response_model=SyllabusAnalysisOut,
     status_code=status.HTTP_201_CREATED,
 )
-async def analyze_syllabus(
+def analyze_syllabus(
     course_id: str,
-    file: UploadFile = File(...),
+    file: UploadedFileRef = Body(embed=True),
     user_id: str = Depends(get_current_user_id),
 ) -> SyllabusAnalysisOut:
     """A syllabus: store it and propose roughly one topic per lecture for review (FR2.10)."""
     _require_membership(user_id, course_id)
-    file_name, key, size, lines = await _store_and_read(file, user_id=user_id, course_id=course_id)
+    file_name, key, size, lines = _store_and_read(file, user_id=user_id, course_id=course_id)
 
     result = material_analysis.analyse_syllabus(
         user_id=user_id, course_id=course_id, file_name=file_name, s3_key=key, size_bytes=size, lines=lines
@@ -624,38 +676,30 @@ def confirm_syllabus(
     return SyllabusConfirmOut(**result)
 
 
-async def _store_and_read(
-    file: UploadFile, *, user_id: str, course_id: str
+def _store_and_read(
+    file: UploadedFileRef, *, user_id: str, course_id: str
 ) -> tuple[str, str, int, list[str]]:
-    """Store one upload under the student's prefix and read its text back from the stored copy.
+    """Read the text back from the file the student already PUT to S3 (see upload-url above).
 
     A file that turns out unreadable is removed again - nothing is kept that the
     student can never use. (AI failing later is different: the file is fine and
     the heuristic takes over.)
     """
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"{file.filename} is larger than 20 MB")
-    if not content:
-        raise HTTPException(status_code=400, detail=f"{file.filename} is empty")
-
-    file_name = file.filename or "upload"
-    key = storage.upload_key(user_id, course_id, file_name)
-    storage.put_object(key, content)
+    content = _fetch_uploaded(file, user_id=user_id, course_id=course_id)
 
     try:
-        lines = file_parser.read_lines(file_name, storage.get_object(key))
+        lines = file_parser.read_lines(file.fileName, content)
     except file_parser.UnsupportedFileType as exc:
-        storage.delete_object(key)
+        storage.delete_object(file.key)
         raise HTTPException(status_code=400, detail="Only PDF and PPTX files are supported") from exc
     except Exception as exc:  # noqa: BLE001 - a corrupt upload shouldn't 500
-        storage.delete_object(key)
-        raise HTTPException(status_code=400, detail=f"Could not read {file_name}") from exc
+        storage.delete_object(file.key)
+        raise HTTPException(status_code=400, detail=f"Could not read {file.fileName}") from exc
 
     if not lines:
-        storage.delete_object(key)
+        storage.delete_object(file.key)
         raise HTTPException(status_code=422, detail="That file had no readable text")
-    return file_name, key, len(content), lines
+    return file.fileName, file.key, len(content), lines
 
 
 def _require_own_pending_material(user_id: str, course_id: str, material_id: str) -> dict[str, Any]:
@@ -697,10 +741,10 @@ def _match_out(match: material_analysis.RankedMatch) -> MatchOut:
     response_model=list[MaterialOut],
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_materials(
+def upload_materials(
     course_id: str,
     topic_id: str,
-    files: list[UploadFile] = File(...),
+    files: list[UploadedFileRef] = Body(embed=True),
     user_id: str = Depends(get_current_user_id),
 ) -> list[MaterialOut]:
     """Attach the student's original files to a topic, kept exactly as uploaded."""
@@ -711,23 +755,15 @@ async def upload_materials(
         raise HTTPException(status_code=413, detail=f"Upload at most {MAX_FILES_PER_UPLOAD} files at a time")
 
     created = []
-    for upload in files:
-        content = await upload.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail=f"{upload.filename} is larger than 20 MB")
-        if not content:
-            raise HTTPException(status_code=400, detail=f"{upload.filename} is empty")
-
-        file_name = upload.filename or "upload"
-        key = storage.upload_key(user_id, course_id, file_name)
-        storage.put_object(key, content)
+    for ref in files:
+        content = _fetch_uploaded(ref, user_id=user_id, course_id=course_id)
         created.append(
             repository.create_material(
                 user_id=user_id,
                 course_id=course_id,
                 topic_id=topic_id,
-                file_name=file_name,
-                s3_key=key,
+                file_name=ref.fileName,
+                s3_key=ref.key,
                 size_bytes=len(content),
             )
         )
