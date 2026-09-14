@@ -1,9 +1,10 @@
 // Sidebar shell wrapped around every authenticated page.
 
 import { NavLink, Outlet } from 'react-router-dom'
-import { LogOut, Zap } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import { appRoutes, routeGroups } from '../routes/routeConfig'
 import { useAuth } from '../auth/AuthContext'
+import { Logo } from './Logo'
 import { cn } from '../lib/utils'
 
 export function AppLayout() {
@@ -12,9 +13,8 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <Zap className="size-5 text-primary" aria-hidden />
-          <span className="text-lg font-semibold tracking-tight">LearnSprint</span>
+        <div className="px-5 py-5">
+          <Logo className="h-7 w-auto" />
         </div>
 
         <nav className="flex-1 space-y-6 px-3 py-2">
