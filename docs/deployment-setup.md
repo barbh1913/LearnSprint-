@@ -88,7 +88,7 @@ Only `index.html` needs invalidating — every other asset is content-hashed, so
 
 ## Google Calendar sync (FR6.2) — one-time manual setup
 
-The code is already deployed with every backend push; what is missing until this is done is the Google OAuth client, which only you can create. Until then the Calendar page hides the Google controls (`GET /integrations/google-calendar/status` answers `configured: false`). See [ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md) for why this is a separate Google OAuth client rather than the Cognito sign-in.
+The code is already deployed with every backend push; what is missing until this is done is the Google OAuth client, which only you can create. Until then the Calendar page shows the Google Calendar card as **Not available** with a disabled Connect button (`GET /integrations/google-calendar/status` answers `configured: false`). See [ADR 0010](adr/0010-google-calendar-sync-via-direct-api.md) for why this is a separate Google OAuth client rather than the Cognito sign-in.
 
 **1. Google Cloud console** (any project — a new one is fine):
 - APIs & Services → Library → enable **Google Calendar API**.

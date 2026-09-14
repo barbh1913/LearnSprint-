@@ -27,17 +27,18 @@ beforeEach(() => {
 })
 
 describe('GoogleCalendarControls', () => {
-  it('stays out of the way when the server has no Google client', async () => {
+  it('shows the feature as not available when the server has no Google client', async () => {
     mockApi({
       'GET /integrations/google-calendar/status': () => ({
         body: { configured: false, connected: false, connectedAt: null, lastSyncedAt: null },
       }),
     })
 
-    const { container } = render(<GoogleCalendarControls courseId="c1" canSync />)
+    render(<GoogleCalendarControls courseId="c1" canSync />)
 
-    await waitFor(() => expect(fetch).toHaveBeenCalled())
-    expect(container).toBeEmptyDOMElement()
+    expect(await screen.findByText('Not available')).toBeInTheDocument()
+    expect(screen.getByText(/not set up on this server/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect Google Calendar' })).toBeDisabled()
   })
 
   it('syncs the chosen course and reports how much landed', async () => {
