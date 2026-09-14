@@ -83,3 +83,25 @@ jobs:
           for function in $FUNCTIONS; do
             aws lambda wait function-updated --function-name "$function"
           done
+
+      # Only content_topics reads this (FR2.7, ADR 0013) - no other function
+      # needs the key in its environment. update-function-configuration
+      # replaces the whole Variables map, so this reads the current one and
+      # merges the key in with jq rather than clobbering DYNAMO_TABLE etc.
+      # jq --arg JSON-escapes the value safely - it's never interpolated
+      # into a shell string or echoed anywhere.
+      - name: Sync the Anthropic key onto learnsprint-content-topics
+        if: ${{ secrets.SYSTEM_ANTHROPIC_API_KEY != '' }}
+        env:
+          SYSTEM_ANTHROPIC_API_KEY: ${{ secrets.SYSTEM_ANTHROPIC_API_KEY }}
+        run: |
+          aws lambda get-function-configuration \
+            --function-name learnsprint-content-topics \
+            --query "Environment.Variables" --output json > current-env.json
+          jq --arg key "$SYSTEM_ANTHROPIC_API_KEY" \
+            '{Variables: (. + {SYSTEM_ANTHROPIC_API_KEY: $key})}' \
+            current-env.json > updated-env.json
+          aws lambda update-function-configuration \
+            --function-name learnsprint-content-topics \
+            --environment file://updated-env.json
+          aws lambda wait function-updated --function-name learnsprint-content-topics
