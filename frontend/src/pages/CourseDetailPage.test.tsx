@@ -143,9 +143,11 @@ describe('CourseDetailPage', () => {
 
     fireEvent.click(await screen.findByLabelText('Delete Heaps'))
 
-    expect(window.confirm).toHaveBeenCalledWith(
-      'Delete "Heaps"? This also removes everyone\'s progress on it.',
-    )
+    expect(screen.getByRole('dialog', { name: 'Delete topic?' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    expect(window.confirm).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(deleted).toBe(false)
   })
 
@@ -157,6 +159,8 @@ describe('CourseDetailPage', () => {
 
     fireEvent.click(await screen.findByLabelText('Delete Heaps'))
 
+    expect(deleted).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }))
     await waitFor(() => expect(deleted).toBe(true))
   })
 
@@ -174,9 +178,9 @@ describe('CourseDetailPage', () => {
     expect(screen.getByText('2 of 3 selected')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Delete selected (2)' }))
 
-    expect(window.confirm).toHaveBeenCalledWith(
-      "Delete 2 topics? This also removes everyone's progress on them.",
-    )
+    expect(screen.getByRole('dialog', { name: 'Delete topics?' })).toBeInTheDocument()
+    expect(deleted).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }))
     await waitFor(() => expect(deleted).toHaveLength(2))
     expect(deleted.map((url) => url.split('/').pop())).toEqual(['t1', 't3'])
   })
