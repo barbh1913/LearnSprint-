@@ -38,6 +38,8 @@ export function TopicDetailDialog({
   const [newSubtask, setNewSubtask] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState('')
+  const [saveStatus, setSaveStatus] = useState('')
+  const pendingSaves = useRef(new Set<Promise<boolean>>())
   const fileInput = useRef<HTMLInputElement>(null)
 
   const topicId = card?.topicId ?? null
@@ -62,14 +64,30 @@ export function TopicDetailDialog({
 
   if (!card) return null
 
-  async function runMutation(action: () => Promise<unknown>) {
-    try {
-      await action()
-      setError('')
-      onChanged()
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'That change could not be saved')
-    }
+  function runMutation(action: () => Promise<unknown>) {
+    setSaveStatus('')
+    const request = (async () => {
+      try {
+        await action()
+        setError('')
+        onChanged()
+        return true
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'That change could not be saved')
+        return false
+      }
+    })()
+    pendingSaves.current.add(request)
+    void request.then(() => pendingSaves.current.delete(request))
+    return request
+  }
+
+  async function handleSave() {
+    // Flush the active input's existing onBlur save before awaiting requests.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    setSaveStatus('Saving…')
+    const results = await Promise.all([...pendingSaves.current])
+    setSaveStatus(results.every(Boolean) && !error ? 'Changes saved' : '')
   }
 
   function handleRename() {
@@ -417,6 +435,14 @@ export function TopicDetailDialog({
               <MasteryPicker value={card.masteryLevel} onChange={handleMastery} />
             </div>
           )}
+          <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-border bg-background pt-4">
+            <p role="status" className="text-xs text-muted-foreground">
+              {saveStatus || 'Edits save automatically when you leave a field.'}
+            </p>
+            <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={saveStatus === 'Saving…' || isUploading}>
+              {saveStatus === 'Saving…' ? 'Saving…' : 'Save changes'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
