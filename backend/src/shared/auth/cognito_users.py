@@ -169,8 +169,11 @@ def _raise_for(
         raise not_authorized() from exc
     if code == "UserNotFoundException":
         raise user_not_found() from exc
-    if code == "InvalidPasswordException":
-        raise WeakPassword(_message(exc) or "That password does not meet the policy") from exc
+    if code in ("InvalidPasswordException", "InvalidParameterException"):
+        # Cognito sometimes reports password-policy and attribute validation
+        # failures as InvalidParameterException. Preserve its actionable message
+        # instead of reducing it to a generic service-unavailable error.
+        raise WeakPassword(_message(exc) or "The account details do not meet Cognito's policy") from exc
     if code in ("CodeMismatchException", "ExpiredCodeException"):
         raise InvalidCode() from exc
     raise CognitoUnavailable(f"Cognito refused the request ({code or 'unknown error'})") from exc
