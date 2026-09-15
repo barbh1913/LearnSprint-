@@ -454,3 +454,19 @@ def _review_minutes_by_topic(schedule: Schedule) -> dict[str, int]:
         if block.block_type is BlockType.REVIEW and block.topic_id:
             totals[block.topic_id] = totals.get(block.topic_id, 0) + block.duration_minutes
     return totals
+
+
+def test_all_day_includes_afternoon_and_respects_blocked_and_occupied_time():
+    from datetime import time
+    windows = find_available_windows(
+        now=datetime(2026, 9, 7, 0, 0),
+        exam_date=datetime(2026, 9, 8, 0, 0),
+        blocked_slots=[BlockedSlot(day_of_week=0, start_time=time(9), end_time=time(12))],
+        time_preference=TimePreference.ALL_DAY,
+        occupied=[(datetime(2026, 9, 7, 18), datetime(2026, 9, 7, 19))],
+    )
+    assert windows == [
+        (datetime(2026, 9, 7, 6), datetime(2026, 9, 7, 9)),
+        (datetime(2026, 9, 7, 12), datetime(2026, 9, 7, 18)),
+        (datetime(2026, 9, 7, 19), datetime(2026, 9, 7, 23)),
+    ]

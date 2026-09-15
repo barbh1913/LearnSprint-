@@ -36,6 +36,7 @@ from features.scheduling.domain.models import (
 STUDY_DAY_BOUNDS: dict[TimePreference, tuple[time, time]] = {
     TimePreference.MORNING: (time(6, 0), time(14, 0)),
     TimePreference.EVENING: (time(15, 0), time(23, 0)),
+    TimePreference.ALL_DAY: (time(6, 0), time(23, 0)),
 }
 
 # weight = 6 - mastery, so mastery 1 -> weight 5 and mastery 5 -> weight 1.

@@ -23,6 +23,7 @@ class ActionType(str, Enum):
 class TimePreference(str, Enum):
     MORNING = "morning"
     EVENING = "evening"
+    ALL_DAY = "all_day"
 
 
 class ExamType(str, Enum):

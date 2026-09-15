@@ -106,6 +106,7 @@ export function ProfilePage() {
           >
             <option value="morning">Mornings (06:00 – 14:00)</option>
             <option value="evening">Evenings (15:00 – 23:00)</option>
+            <option value="all_day">All day / No preference (06:00 – 23:00)</option>
           </Select>
         </Field>
       </Card>

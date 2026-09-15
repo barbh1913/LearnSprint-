@@ -245,7 +245,7 @@ export interface BlockedSlot {
 
 export interface UserConstraints {
   blockedSlots: BlockedSlot[]
-  timePreference: 'morning' | 'evening'
+  timePreference: 'morning' | 'evening' | 'all_day'
 }
 
 export interface AverageBreakdown {
