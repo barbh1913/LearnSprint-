@@ -160,7 +160,7 @@ describe('CourseDetailPage', () => {
     fireEvent.click(await screen.findByLabelText('Delete Heaps'))
 
     expect(deleted).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(deleted).toBe(true))
   })
 
@@ -180,7 +180,7 @@ describe('CourseDetailPage', () => {
 
     expect(screen.getByRole('dialog', { name: 'Delete topics?' })).toBeInTheDocument()
     expect(deleted).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(deleted).toHaveLength(2))
     expect(deleted.map((url) => url.split('/').pop())).toEqual(['t1', 't3'])
   })
