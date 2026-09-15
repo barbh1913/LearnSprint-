@@ -212,3 +212,14 @@ describe('TopicDetailDialog', () => {
     )
   })
 })
+
+it('flushes the focused description and confirms saving', async () => {
+  const calls = mockApi()
+  renderDialog()
+  const description = screen.getByLabelText('Description')
+  description.focus()
+  fireEvent.change(description, { target: { value: 'Updated description' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await screen.findByText('Changes saved')
+  expect(lastCall(calls, 'PATCH')).toMatchObject({ body: { description: 'Updated description' } })
+})
