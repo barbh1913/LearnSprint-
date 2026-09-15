@@ -10,6 +10,7 @@ import type {
   SyllabusAnalysis,
   SyllabusItemDecision,
 } from '../types'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../components/ui/dialog'
 import { STATUS_LABELS } from '../types'
 import { MaterialDecisionDialog } from '../components/MaterialDecisionDialog'
 import { SyllabusReviewDialog } from '../components/SyllabusReviewDialog'
@@ -41,6 +42,10 @@ export function CourseDetailPage() {
   const [syllabus, setSyllabus] = useState<SyllabusAnalysis | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isDeletingSelected, setIsDeletingSelected] = useState(false)
+  const [deleteTargets, setDeleteTargets] = useState<BoardCard[]>([])
+  const [deleteError, setDeleteError] = useState('')
+  const deleteInFlight = useRef(false)
+  const cancelDelete = useRef<HTMLButtonElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const singleFileInput = useRef<HTMLInputElement>(null)
   const syllabusInput = useRef<HTMLInputElement>(null)
@@ -193,8 +198,8 @@ export function CourseDetailPage() {
   }
 
   function handleDeleteTopic(card: BoardCard) {
-    if (!confirm(`Delete "${card.name}"? This also removes everyone's progress on it.`)) return
-    runMutation(() => api.deleteTopic(courseId, card.topicId))
+    setDeleteError('')
+    setDeleteTargets([card])
   }
 
   function toggleSelected(topicId: string, isSelected: boolean) {
@@ -210,25 +215,36 @@ export function CourseDetailPage() {
     setSelectedIds(isSelected ? new Set(cards.map((card) => card.topicId)) : new Set())
   }
 
-  /** Bulk delete: one confirmation, then the same per-topic delete the trash icon uses (FR2.2). */
-  async function handleDeleteSelected() {
-    const chosen = cards.filter((card) => selectedIds.has(card.topicId))
-    if (chosen.length === 0) return
-    const what = chosen.length === 1 ? `"${chosen[0].name}"` : `${chosen.length} topics`
-    if (!confirm(`Delete ${what}? This also removes everyone's progress on them.`)) return
+  function handleDeleteSelected() {
+    setDeleteError('')
+    setDeleteTargets(cards.filter((card) => selectedIds.has(card.topicId)))
+  }
 
+  async function confirmDeleteTopics() {
+    if (deleteInFlight.current || deleteTargets.length === 0) return
+    deleteInFlight.current = true
     setIsDeletingSelected(true)
-    setError('')
+    setDeleteError('')
+    const remaining = [...deleteTargets]
     try {
-      for (const card of chosen) {
-        await api.deleteTopic(courseId, card.topicId)
+      while (remaining.length > 0) {
+        await api.deleteTopic(courseId, remaining[0].topicId)
+        const deletedId = remaining.shift()!.topicId
+        setCards((current) => current.filter((card) => card.topicId !== deletedId))
+        setSelectedIds((current) => {
+          const next = new Set(current)
+          next.delete(deletedId)
+          return next
+        })
       }
-      setSelectedIds(new Set())
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Some topics could not be deleted')
-    } finally {
-      setIsDeletingSelected(false)
+      setDeleteTargets([])
       await load()
+    } catch (caught) {
+      setDeleteTargets(remaining)
+      setDeleteError(caught instanceof Error ? caught.message : 'Could not delete the remaining topics')
+    } finally {
+      deleteInFlight.current = false
+      setIsDeletingSelected(false)
     }
   }
 
@@ -412,6 +428,38 @@ export function CourseDetailPage() {
       <div className="mt-6">
         <CourseMembers courseId={courseId} />
       </div>
+
+      <Dialog open={deleteTargets.length > 0} onOpenChange={(open) => {
+        if (!open && !deleteInFlight.current) setDeleteTargets([])
+      }}>
+        <DialogContent
+          showCloseButton={!isDeletingSelected}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            cancelDelete.current?.focus()
+          }}
+        >
+          <DialogTitle>{deleteTargets.length === 1 ? 'Delete topic?' : 'Delete topics?'}</DialogTitle>
+          <DialogDescription>
+            {deleteTargets.length === 1
+              ? `Delete "${deleteTargets[0].name}"?`
+              : `Delete ${deleteTargets.length} selected topics?`}
+            {' '}This also removes everyone's progress on these topics. This cannot be undone.
+          </DialogDescription>
+          {deleteError && <ErrorNote message={deleteError} />}
+          <div className="flex justify-end gap-2">
+            <button ref={cancelDelete} type="button" disabled={isDeletingSelected}
+              onClick={() => setDeleteTargets([])}
+              className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50">
+              Cancel
+            </button>
+            <Button type="button" variant="danger" disabled={isDeletingSelected}
+              onClick={() => void confirmDeleteTopics()}>
+              {isDeletingSelected ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <MaterialDecisionDialog
         key={analysis?.materialId ?? 'none'}
