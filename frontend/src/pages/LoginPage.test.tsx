@@ -48,7 +48,7 @@ describe('LoginPage', () => {
     fireEvent.change(await screen.findByPlaceholderText(/name@/), {
       target: { value: 'bar@example.com' },
     })
-    fireEvent.change(screen.getByPlaceholderText(/8 characters/), {
+    fireEvent.change(screen.getByPlaceholderText('Password'), {
       target: { value: 'wrongpass' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
