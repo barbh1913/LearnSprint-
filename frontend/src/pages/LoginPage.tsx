@@ -21,6 +21,18 @@ export function LoginPage() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     setError('')
+
+    if (
+      mode === 'register' &&
+      (!/[a-z]/.test(password) ||
+        !/[A-Z]/.test(password) ||
+        !/\d/.test(password) ||
+        !/[^A-Za-z0-9]/.test(password))
+    ) {
+      setError('Password must include uppercase, lowercase, a number, and a special character')
+      return
+    }
+
     setIsSubmitting(true)
 
     try {
@@ -83,7 +95,7 @@ export function LoginPage() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 8 characters"
+              placeholder={mode === 'login' ? 'Password' : '8+ characters with Aa, 1, and !'}
               required
               minLength={8}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
