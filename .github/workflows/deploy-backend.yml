@@ -91,10 +91,13 @@ jobs:
       # jq --arg JSON-escapes the value safely - it's never interpolated
       # into a shell string or echoed anywhere.
       - name: Sync the Anthropic key onto learnsprint-content-topics
-        if: ${{ secrets.SYSTEM_ANTHROPIC_API_KEY != '' }}
         env:
           SYSTEM_ANTHROPIC_API_KEY: ${{ secrets.SYSTEM_ANTHROPIC_API_KEY }}
         run: |
+          if [ -z "$SYSTEM_ANTHROPIC_API_KEY" ]; then
+            echo "Skipping optional Anthropic configuration: secret is not configured."
+            exit 0
+          fi
           aws lambda get-function-configuration \
             --function-name learnsprint-content-topics \
             --query "Environment.Variables" --output json > current-env.json
@@ -113,12 +116,15 @@ jobs:
       # client id secret the step is skipped and the Calendar page shows the
       # Google card as "Not available".
       - name: Sync the Google Calendar client onto learnsprint-scheduling
-        if: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID != '' }}
         env:
           GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
           GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
           GOOGLE_CALENDAR_REDIRECT_URI: https://d6dbklbpa5amn.cloudfront.net/calendar/google/callback
         run: |
+          if [ -z "$GOOGLE_CALENDAR_CLIENT_ID" ]; then
+            echo "Skipping optional Calendar configuration: client ID is not configured."
+            exit 0
+          fi
           aws lambda get-function-configuration \
             --function-name learnsprint-scheduling \
             --query "Environment.Variables" --output json > current-env.json
